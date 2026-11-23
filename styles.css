@@ -313,14 +313,14 @@ main { padding: 0 var(--gutter) 24px; outline: none; }
 @media (prefers-color-scheme: dark) { .tabs a[aria-current] { color: var(--yellow); } }
 
 /* ---------- analista IA ---------- */
-.chat { display: grid; gap: 10px; padding-top: 8px; padding-bottom: 76px; }
+.chat { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-top: 8px; padding-bottom: 76px; }
 .new-chat { justify-self: end; }
 .link { background: none; border: 0; color: var(--muted); text-decoration: underline; cursor: pointer; padding: 6px 0; font-size: 0.9rem; }
 .chip {
   display: block; width: 100%; margin: 8px 0 0; padding: 10px 14px; text-align: left; cursor: pointer;
   border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
 }
-.bubble { max-width: 92%; padding: 10px 12px; border-radius: 14px; overflow-wrap: anywhere; }
+.bubble { max-width: 92%; min-width: 0; padding: 10px 12px; border-radius: 14px; overflow-wrap: anywhere; }
 .bubble.user { justify-self: end; background: var(--turf); color: #fff; border-bottom-right-radius: 4px; white-space: pre-wrap; }
 .bubble.ai { justify-self: start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 4px; max-width: 100%; }
 .bubble.ai p { margin: 0 0 8px; }
