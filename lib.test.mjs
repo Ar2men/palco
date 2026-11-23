@@ -36,3 +36,13 @@ assert.equal(st[0].rows[1].zone, '', 'non-hex colours from the API never reach a
 assert.deepEqual(moveItem(['a', 'b', 'c'], 0, 1), ['b', 'a', 'c']);
 assert.deepEqual(moveItem(['a', 'b'], 0, -1), ['a', 'b']);
 console.log('ok');
+
+// md(): HTML is escaped, tables/lists/bold render
+import { md } from './lib.js';
+assert.equal(md('<img src=x onerror=alert(1)>'), '<p>&lt;img src=x onerror=alert(1)&gt;</p>');
+const t = md('**1X2**\n\n| Mercado | Prob |\n|---|---|\n| Local | 55% |\n\n- uno\n- dos');
+assert.match(t, /<p><b>1X2<\/b><\/p>/);
+assert.match(t, /<th>Mercado<\/th>.*<td>55%<\/td>/);
+assert.ok(!t.includes('---'));
+assert.match(t, /<ul><li>uno<\/li><li>dos<\/li><\/ul>/);
+console.log('md ok');

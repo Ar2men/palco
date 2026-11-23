@@ -1,5 +1,5 @@
 import { LEAGUES, DEFAULT_LEAGUES, ymd, addDays, datesAround, uniqueEvents, eventsForDay,
-  simplifyEvent, simplifyStandings, statusLabel, moveItem } from './lib.js';
+  simplifyEvent, simplifyStandings, statusLabel, moveItem, md } from './lib.js';
 
 // shortcut: ESPN's public API is unofficial and undocumented; if it changes, only get()/the views below need fixing.
 const API = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
@@ -156,7 +156,7 @@ async function viewMatch(lg, id, quiet) {
     return `<li class="ev ${k.team?.id === home.team.id ? 'home' : 'away'} ${kind}"><span class="min">${esc(k.clock?.displayValue)}</span><i class="icon" aria-label="${kind}"></i><span class="who">${text}</span></li>`;
   }).join('');
 
-  const box = Object.fromEntries((d.boxscore?.teams ?? []).map(t => [t.team.id, Object.fromEntries(t.statistics.map(s => [s.name, s.displayValue]))]));
+  const box = Object.fromEntries((d.boxscore?.teams ?? []).map(t => [t.team.id, Object.fromEntries((t.statistics ?? []).map(s => [s.name, s.displayValue]))]));
   const hs = box[home.team.id] ?? {}, as = box[away.team.id] ?? {};
   const stats = STATS.filter(([k]) => hs[k] != null && as[k] != null).map(([k, label]) => {
     const a = parseFloat(hs[k]) || 0, b = parseFloat(as[k]) || 0, tot = a + b || 1;
@@ -164,7 +164,8 @@ async function viewMatch(lg, id, quiet) {
       <span class="bar"><i style="width:${(a / tot) * 100}%"></i><i style="width:${(b / tot) * 100}%"></i></span></li>`;
   }).join('');
 
-  const lineup = (d.rosters ?? []).map(r => {
+  // Before kickoff ESPN sends the teams without a roster list.
+  const lineup = (d.rosters ?? []).filter(r => r.roster?.length).map(r => {
     const list = (arr) => arr.map(p => `<li><span class="num">${esc(p.jersey)}</span>${esc(p.athlete?.displayName)}
       <span class="pos">${esc(p.position?.abbreviation)}</span>${p.subbedOut ? '<i class="out" aria-label="salió"></i>' : ''}${p.subbedIn ? '<i class="in" aria-label="entró"></i>' : ''}</li>`).join('');
     const starters = r.roster.filter(p => p.starter), subs = r.roster.filter(p => !p.starter);
@@ -216,8 +217,130 @@ function viewSettings() {
     <h2>Preferencias</h2>
     <label class="row"><span>Formato de 12 horas</span><input type="checkbox" id="h12" ${h12 ? 'checked' : ''}></label>
     <label class="row"><span>Ocultar marcadores (sin spoilers)</span><input type="checkbox" id="nospoil-set" ${noSpoil ? 'checked' : ''}></label>
-    <p class="about">Palco no tiene anuncios, cuotas de apuestas, cuenta ni rastreo. Datos: API pública de ESPN.</p>
+    <h2>Analista IA</h2>
+    <p class="hint">Usa tu clave de API de Claude (console.anthropic.com → API Keys). Se guarda solo en este teléfono y
+      solo se envía a Anthropic. Cada respuesta cuesta unos centavos de dólar: pon un límite de gasto en tu cuenta.</p>
+    <form class="key-form" data-key-form>
+      <input type="password" name="key" autocomplete="off" placeholder="${apiKey ? 'Clave guardada ••••' + esc(apiKey.slice(-4)) : 'sk-ant-…'}" aria-label="Clave de API de Claude">
+      <button class="btn" type="submit">Guardar</button>
+      ${apiKey ? '<button type="button" class="link" data-key-clear>Borrar clave</button>' : ''}
+    </form>
+    <p class="about">Palco no tiene anuncios, cuenta ni rastreo. Datos: API pública de ESPN. Análisis: Claude (Anthropic).</p>
   </div>`;
+}
+
+/* ---------- analista IA ---------- */
+
+// shortcut: the SDK is loaded from a CDN on first use; pin a newer version here when you want new API features.
+const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.7.0/+esm';
+const SYSTEM = `Eres el analista de fútbol de Palco, la app personal del usuario. Respondes en español, directo y conciso.
+Tu trabajo: analizar los partidos que te pida y darle las mejores recomendaciones con probabilidades reales.
+- Antes de estimar, busca con web_search lo que importa: forma reciente, bajas y lesiones, alineación probable, tabla, xG si aparece y momios de varias casas. Primero los datos que encontraste, después las probabilidades.
+- Usa solo datos de confianza media o alta. Lo que no aparezca: "sin dato". Nunca inventes estadísticas.
+- Da probabilidades en %, la cuota justa (1 / probabilidad) y, si encontraste momios, di dónde hay valor.
+- Cuando analices un partido cubre: 1X2, goles (más/menos), ambos anotan, hándicap asiático, y córners, tarjetas y goleador si hay datos.
+- Cierra con una opción de bajo riesgo y una arriesgada, cada una con su probabilidad real.
+- Formato: tablas cortas en Markdown y un resumen de 1 o 2 líneas al final. Di "apuestas", nunca "piernas".
+- Son estimaciones, no garantías: nunca digas que algo se gana seguro y recuérdale apostar solo lo que puede perder.
+Cada mensaje del usuario empieza con <contexto>: la fecha y los partidos de sus ligas según ESPN, en su hora local. Úsalo como punto de partida.`;
+
+let apiKey = load('claveIA', '');
+let chatApi = load('chatApi', []);   // exact messages sent to the API (thinking and search blocks included)
+let chatView = load('chatView', []); // what the user sees: { role, text }
+let chatBusy = false;
+
+async function matchContext() {
+  const now = new Date();
+  const res = await Promise.allSettled(myLeagues.map(id => scoreboard(id, datesAround(now, 0, 2))));
+  const lines = [];
+  res.forEach((r, i) => r.status === 'fulfilled' && r.value.map(simplifyEvent)
+    .filter(e => new Date(e.date) >= addDays(now, -1))
+    .forEach(e => lines.push(`${leagueName(myLeagues[i])} | ${e.home.name} vs ${e.away.name} | ` +
+      `${new Date(e.date).toLocaleString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: h12 })} | ` +
+      (e.state === 'pre' ? 'por jugar' : `${e.label} ${e.home.score}-${e.away.score}`))));
+  return `<contexto>\nAhora: ${now.toLocaleString('es-MX', { dateStyle: 'full', timeStyle: 'short' })}\n` +
+    `Partidos de sus ligas (hoy y 2 días):\n${lines.slice(0, 60).join('\n') || 'sin partidos'}\n</contexto>`;
+}
+
+function renderChat(note = '') {
+  if (location.hash !== '#/ia') return;
+  if (!apiKey) {
+    main.innerHTML = `<div class="empty"><p>Para usar el analista, guarda tu clave de API de Claude.</p><a class="btn" href="#/ajustes">Ir a Ajustes</a></div>`;
+    return;
+  }
+  const msgs = chatView.map(m => m.role === 'user'
+    ? `<div class="bubble user">${esc(m.text)}</div>` : `<div class="bubble ai">${md(m.text)}</div>`).join('');
+  const ideas = ['¿Qué partidos de hoy tienen más valor?', 'Analiza el próximo partido de la Liga MX', 'Dame una opción de bajo riesgo para hoy'];
+  main.innerHTML = `<div class="chat">
+    ${chatView.length ? '<button class="link new-chat" type="button" data-new-chat>Nueva conversación</button>' : ''}
+    ${msgs || `<div class="empty"><p>Pregunta por cualquier partido de tus ligas.</p>${ideas.map(q => `<button class="chip" type="button" data-ask="${esc(q)}">${esc(q)}</button>`).join('')}</div>`}
+    ${chatBusy ? `<div class="bubble ai thinking">${loading()}<p>Buscando datos y analizando… puede tardar un minuto.</p></div>` : ''}
+    ${note ? `<p class="note chat-note">${esc(note)}</p>` : ''}
+    <form class="composer" data-chat-form>
+      <textarea name="q" rows="1" placeholder="Pregunta al analista" aria-label="Mensaje para el analista" ${chatBusy ? 'disabled' : ''}></textarea>
+      <button class="btn" type="submit" ${chatBusy ? 'disabled' : ''}>Enviar</button>
+    </form></div>`;
+  main.querySelector('.composer')?.scrollIntoView({ block: 'end' });
+}
+
+function viewChat() { renderChat(); }
+
+async function sendChat(text) {
+  if (chatBusy || !text.trim()) return;
+  chatBusy = true;
+  const before = chatApi.length;
+  chatView.push({ role: 'user', text });
+  renderChat();
+  let note = '';
+  try {
+    const [{ default: Anthropic }, ctx] = await Promise.all([import(SDK_URL), matchContext()]);
+    const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+    chatApi.push({ role: 'user', content: `${ctx}\n\n${text}` });
+    let reply = '', res;
+    try {
+      for (let i = 0; i < 5; i++) {
+        res = await client.beta.messages.create({
+          model: 'claude-opus-5-5',
+          max_tokens: 16000,
+          output_config: { effort: 'medium' },
+          // On a safety decline the API retries the request on another model by itself.
+          betas: ['server-side-fallback-2026-07-01'],
+          fallbacks: 'default',
+          system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+          tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 6 }],
+          messages: chatApi,
+        });
+        chatApi.push({ role: 'assistant', content: res.content }); // sent back unchanged next turn
+        reply += res.content.filter(b => b.type === 'text').map(b => b.text).join('');
+        if (res.stop_reason !== 'pause_turn') break; // long web searches pause; resending continues them
+      }
+    } catch (err) {
+      chatApi.length = before;
+      throw err;
+    }
+    if (res.stop_reason === 'refusal') {
+      chatApi.length = before;
+      chatView.pop();
+      note = 'El analista no respondió esa pregunta. Prueba a decirla de otra forma.';
+    } else {
+      chatView.push({ role: 'ai', text: reply || 'Sin respuesta.' + (res.stop_reason === 'max_tokens' ? ' (se cortó por largo)' : '') });
+    }
+  } catch (err) {
+    console.error(err);
+    chatView.pop();
+    const s = err?.status;
+    note = s === 401 ? 'Tu clave de API no es válida. Revísala en Ajustes.'
+      : s === 429 ? 'Demasiadas solicitudes seguidas. Espera un momento y vuelve a enviar.'
+      : s === 402 || /credit/i.test(err?.message ?? '') ? 'Tu cuenta de Anthropic no tiene saldo. Agrega créditos en console.anthropic.com.'
+      : !navigator.onLine ? 'Sin conexión a internet. Revisa tu conexión.'
+      : `El analista no pudo responder (${s ?? 'error de red'}). Vuelve a enviar.`;
+    setTimeout(() => { const q = main.querySelector('[name=q]'); if (q) q.value = text; });
+  }
+  chatBusy = false;
+  // Both or neither: a saved view without its API history would confuse the next reply.
+  try { localStorage.setItem('chatApi', JSON.stringify(chatApi)); localStorage.setItem('chatView', JSON.stringify(chatView)); }
+  catch { try { localStorage.removeItem('chatApi'); localStorage.removeItem('chatView'); } catch { /* storage off */ } }
+  renderChat(note);
 }
 
 const loading = () => `<div class="loading" role="status"><span></span><span></span><span></span><span class="sr">Cargando…</span></div>`;
@@ -225,7 +348,7 @@ const noLeagues = () => { main.innerHTML = `<div class="empty"><p>Elige las liga
 
 /* ---------- router ---------- */
 
-const routes = { '': viewDay, proximos: viewUpcoming, tablas: viewTables, ajustes: viewSettings, partido: viewMatch };
+const routes = { '': viewDay, proximos: viewUpcoming, ia: viewChat, tablas: viewTables, ajustes: viewSettings, partido: viewMatch };
 
 async function route(quiet = false) {
   clearTimeout(timer);
@@ -239,7 +362,8 @@ async function route(quiet = false) {
     await view(...args.map(decodeURIComponent), ...(view === viewDay ? [quiet] : view === viewMatch ? [quiet] : []));
   } catch (err) {
     console.error(err);
-    if (!quiet) main.innerHTML = `<div class="empty"><p>No se pudieron cargar los datos. Revisa tu conexión.</p><button class="btn" data-retry>Reintentar</button></div>`;
+    const msg = navigator.onLine ? 'ESPN no mandó los datos de esta pantalla. Intenta en un momento.' : 'Sin conexión a internet. Revisa tu conexión.';
+    if (!quiet) main.innerHTML = `<div class="empty"><p>${msg}</p><button class="btn" data-retry>Reintentar</button></div>`;
   }
   if (!quiet) { window.scrollTo(0, 0); main.focus({ preventScroll: true }); }
 }
@@ -268,6 +392,16 @@ document.addEventListener('click', e => {
   else if (t.dataset.move != null) { myLeagues = moveItem(myLeagues, +t.dataset.move, +t.dataset.delta); save('ligas', myLeagues); viewSettings(); }
   else if (t.dataset.remove) { myLeagues = myLeagues.filter(id => id !== t.dataset.remove); save('ligas', myLeagues); viewSettings(); }
   else if (t.dataset.add) { myLeagues = [...myLeagues, t.dataset.add]; save('ligas', myLeagues); viewSettings(); }
+  else if (t.dataset.ask) { sendChat(t.dataset.ask); }
+  else if (t.dataset.newChat != null && !chatBusy) { chatApi = []; chatView = []; save('chatApi', []); save('chatView', []); renderChat(); }
+  else if (t.dataset.keyClear != null) { apiKey = ''; save('claveIA', ''); viewSettings(); }
+});
+
+document.addEventListener('submit', e => {
+  e.preventDefault();
+  const f = e.target;
+  if (f.dataset.chatForm != null) sendChat(f.q.value);
+  if (f.dataset.keyForm != null && f.key.value.trim()) { apiKey = f.key.value.trim(); save('claveIA', apiKey); viewSettings(); }
 });
 
 document.addEventListener('change', e => {
@@ -280,7 +414,7 @@ let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { hiddenAt = Date.now(); return; }
   if (Date.now() - hiddenAt > 10 * 60e3 && !location.hash.startsWith('#/partido')) { day = new Date(); }
-  if (Date.now() - hiddenAt > 30e3) route(true);
+  if (Date.now() - hiddenAt > 30e3 && location.hash !== '#/ia') route(true);
 });
 
 window.addEventListener('hashchange', () => route());

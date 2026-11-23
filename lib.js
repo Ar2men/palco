@@ -76,3 +76,35 @@ export const moveItem = (list, i, delta) => {
   [a[i], a[j]] = [a[j], a[i]];
   return a;
 };
+
+// Minimal Markdown for the AI replies: tables, headings, lists, paragraphs, **bold**.
+// Escapes HTML first, so nothing in the reply can inject markup.
+const escHtml = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const inline = s => escHtml(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+const cells = line => line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+
+export function md(text) {
+  const out = [];
+  let list = null, table = null, para = [];
+  const flush = () => {
+    if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`), (para = []);
+    if (list) out.push(`<ul>${list.map(li => `<li>${inline(li)}</li>`).join('')}</ul>`), (list = null);
+    if (table) {
+      const [head, ...rows] = table.filter(r => !r.every(c => /^:?-+:?$/.test(c)));
+      out.push(`<div class="md-table"><table><thead><tr>${head.map(c => `<th>${inline(c)}</th>`).join('')}</tr></thead>` +
+        `<tbody>${rows.map(r => `<tr>${r.map(c => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+      table = null;
+    }
+  };
+  for (const line of String(text).split('\n')) {
+    if (/^\s*\|.*\|\s*$/.test(line)) { if (!table) flush(); (table ??= []).push(cells(line)); continue; }
+    const h = line.match(/^#{1,6}\s+(.*)/);
+    const li = line.match(/^\s*(?:[-*]|\d+\.)\s+(.*)/);
+    if (h) { flush(); out.push(`<h4>${inline(h[1])}</h4>`); }
+    else if (li) { if (!list) flush(); (list ??= []).push(li[1]); }
+    else if (!line.trim()) flush();
+    else { if (list || table) flush(); para.push(line); }
+  }
+  flush();
+  return out.join('');
+}

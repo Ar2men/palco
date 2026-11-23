@@ -32,6 +32,18 @@ Se abre a pantalla completa, con su propio ícono, como una app normal.
 
 Edita los archivos, haz `git push` y espera ~1 minuto. Para ver la versión nueva, cierra la app y vuelve a abrirla.
 
+## Analista IA (pestaña "Analista")
+
+Un chat que analiza tus partidos como Prisma: busca en la web forma, bajas y momios, y responde con probabilidades,
+cuota justa y una opción de bajo riesgo y una arriesgada. Usa **Claude Opus 5.5** con búsqueda web.
+
+1. Crea una clave en **console.anthropic.com → API Keys** y agrega crédito.
+2. En la app: **Ajustes → Analista IA**, pega la clave y toca **Guardar**.
+
+La clave se guarda solo en tu teléfono y solo se envía a Anthropic; no está en este repositorio.
+**Cuesta dinero por uso:** cada respuesta con búsquedas sale en unos centavos de dólar. Pon un límite de gasto
+mensual en la consola de Anthropic. Si alguien usa tu teléfono, puede usar tu clave: bórrala desde Ajustes cuando quieras.
+
 ## Probarla en tu computadora
 
 ```powershell
