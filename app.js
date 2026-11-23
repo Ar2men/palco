@@ -1,5 +1,5 @@
 import { LEAGUES, DEFAULT_LEAGUES, ymd, addDays, datesAround, uniqueEvents, eventsForDay,
-  simplifyEvent, simplifyStandings, statusLabel, moveItem, md, pitchRows, decimalOdds, weatherText, pickPlace } from './lib.js';
+  simplifyEvent, simplifyStandings, statusLabel, moveItem, md, pitchRows, decimalOdds, weatherText, pickPlace, eventExtras } from './lib.js';
 
 // shortcut: ESPN's public API is unofficial and undocumented; if it changes, only get()/the views below need fixing.
 const API = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
@@ -248,7 +248,40 @@ async function probableLineups(d, sides) {
   return blocks.join('') || '<p class="note">Todavía no hay alineaciones. Se publican más o menos una hora antes del partido.</p>';
 }
 
+// Everything ESPN gives about one match, as plain text for the AI (it has no internet on the free tier).
+const briefs = new Map();
+function matchBrief(d, home, away) {
+  const nm = c => c.team.displayName;
+  const L = [];
+  const v = d.gameInfo?.venue;
+  if (v) L.push(`Estadio: ${v.fullName} (${[v.address?.city, v.address?.country].filter(Boolean).join(', ')})`);
+  const table = d.standings?.groups?.flatMap(g => g.standings?.entries ?? []) ?? [];
+  for (const c of [home, away]) {
+    const row = table.find(e => e.id === c.team.id);
+    const st = row && Object.fromEntries(row.stats.map(s => [s.name, s.displayValue]));
+    if (st) L.push(`Tabla ${nm(c)}: lugar ${st.rank}, ${st.points} pts en ${st.gamesPlayed} PJ (G-E-P ${st.wins}-${st.ties}-${st.losses}, DG ${st.pointDifferential})`);
+    const games = d.lastFiveGames?.find(t => t.team.id === c.team.id)?.events ?? [];
+    if (games.length) L.push(`Últimos partidos ${nm(c)}: ` + [...games].sort((a, b) => (b.gameDate ?? '').localeCompare(a.gameDate ?? ''))
+      .map(e => `${{ W: 'ganó', D: 'empató', L: 'perdió' }[e.gameResult] ?? '?'} ${e.score} ${e.atVs === '@' ? 'en' : 'vs'} ${e.opponent?.displayName} (${(e.gameDate ?? '').slice(0, 10)}, ${e.leagueAbbreviation ?? ''})`).join('; '));
+  }
+  const h2h = d.seasonseries?.find(s => s.type === 'head-to-head')?.events?.filter(e => e.statusType?.completed) ?? [];
+  if (h2h.length) L.push('Cara a cara: ' + h2h.map(e => { const h = e.competitors.find(c => c.homeAway === 'home'), a = e.competitors.find(c => c.homeAway === 'away');
+    return `${e.date.slice(0, 10)} ${h.team.displayName} ${h.score}-${a.score} ${a.team.displayName}`; }).join('; '));
+  const pc = d.pickcenter?.[0];
+  if (pc?.homeTeamOdds?.moneyLine) L.push(`Momios ${pc.provider?.name ?? ''} (decimal): local ${decimalOdds(pc.homeTeamOdds.moneyLine).toFixed(2)}, empate ${pc.drawOdds?.moneyLine ? decimalOdds(pc.drawOdds.moneyLine).toFixed(2) : '-'}, visita ${decimalOdds(pc.awayTeamOdds.moneyLine).toFixed(2)}` +
+    (pc.overUnder ? `; línea goles ${pc.overUnder}: más ${pc.overOdds ? decimalOdds(pc.overOdds).toFixed(2) : '-'}, menos ${pc.underOdds ? decimalOdds(pc.underOdds).toFixed(2) : '-'}` : ''));
+  for (const t of d.leaders ?? []) {
+    const top = (t.leaders ?? []).filter(c => c.leaders?.[0]).map(c => `${c.displayName}: ${c.leaders[0].athlete?.displayName} (${c.leaders[0].displayValue})`);
+    if (top.length) L.push(`Figuras ${t.team?.displayName}: ${top.join('; ')}`);
+  }
+  const xi = (d.rosters ?? []).filter(r => r.roster?.length);
+  L.push(xi.length ? xi.map(r => `Alineación confirmada ${r.team.displayName} (${r.formation ?? '?'}): ${r.roster.filter(p => p.starter).map(p => p.athlete?.displayName).join(', ')}`).join('\n')
+    : 'Alineaciones: aún no publicadas.');
+  return L.join('\n');
+}
+
 function previa(d, home, away, ask) {
+  briefs.set(ask, matchBrief(d, home, away));
   const form = c => {
     const t = d.lastFiveGames?.find(x => x.team.id === c.team.id);
     if (!t?.events?.length) return '';
@@ -346,11 +379,17 @@ async function matchContext() {
   const now = new Date();
   const res = await Promise.allSettled(myLeagues.map(id => scoreboard(id, datesAround(now, 0, 2))));
   const lines = [];
-  res.forEach((r, i) => r.status === 'fulfilled' && r.value.map(simplifyEvent)
-    .filter(e => new Date(e.date) >= addDays(now, -1))
-    .forEach(e => lines.push(`${leagueName(myLeagues[i])} | ${e.home.name} vs ${e.away.name} | ` +
-      `${new Date(e.date).toLocaleString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: h12 })} | ` +
-      (e.state === 'pre' ? 'por jugar' : `${e.label} ${e.home.score}-${e.away.score}`))));
+  const dec = n => n ? n.toFixed(2) : '-';
+  res.forEach((r, i) => r.status === 'fulfilled' && r.value
+    .filter(raw => new Date(raw.date) >= addDays(now, -1))
+    .forEach(raw => {
+      const e = simplifyEvent(raw), { form, odds } = eventExtras(raw);
+      lines.push(`${leagueName(myLeagues[i])} | ${e.home.name} vs ${e.away.name} | ` +
+        `${new Date(e.date).toLocaleString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: h12 })} | ` +
+        (e.state === 'pre' ? 'por jugar' : `${e.label} ${e.home.score}-${e.away.score}`) +
+        (form.home || form.away ? ` | forma reciente (W gana, D empata, L pierde) local ${form.home || '-'}, visita ${form.away || '-'}` : '') +
+        (odds ? ` | momios L ${dec(odds.home)} E ${dec(odds.draw)} V ${dec(odds.away)}${odds.total ? `, línea goles ${odds.total}` : ''}` : ''));
+    }));
   return `<contexto>\nAhora: ${now.toLocaleString('es-MX', { dateStyle: 'full', timeStyle: 'short' })}\n` +
     `Partidos de sus ligas (hoy y 2 días):\n${lines.slice(0, 60).join('\n') || 'sin partidos'}\n</contexto>`;
 }
@@ -374,7 +413,7 @@ function renderChat(note = '') {
 
 function viewChat() { renderChat(); }
 
-async function sendChat(text) {
+async function sendChat(text, extra = '') {
   if (chatBusy || !text.trim()) return;
   chatBusy = true;
   const before = chatApi.length;
@@ -382,7 +421,7 @@ async function sendChat(text) {
   renderChat();
   let note = '';
   try {
-    chatApi.push({ role: 'user', content: `${await matchContext()}\n\n${text}` });
+    chatApi.push({ role: 'user', content: `${await matchContext()}${extra ? `\n<partido>\n${extra}\n</partido>` : ''}\n\n${text}` });
     let res;
     try {
       const r = await fetch(AI_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messages: chatApi }) });
@@ -469,7 +508,7 @@ document.addEventListener('click', e => {
   else if (t.dataset.remove) { myLeagues = myLeagues.filter(id => id !== t.dataset.remove); save('ligas', myLeagues); viewSettings(); }
   else if (t.dataset.add) { myLeagues = [...myLeagues, t.dataset.add]; save('ligas', myLeagues); viewSettings(); }
   else if (t.dataset.ask) { sendChat(t.dataset.ask); }
-  else if (t.dataset.aiAsk) { location.hash = '#/ia'; setTimeout(() => sendChat(t.dataset.aiAsk), 0); }
+  else if (t.dataset.aiAsk) { const q = t.dataset.aiAsk; location.hash = '#/ia'; setTimeout(() => sendChat(q, briefs.get(q)), 0); }
   else if (t.dataset.newChat != null && !chatBusy) { chatApi = []; chatView = []; save('chatApi', []); save('chatView', []); renderChat(); }
 });
 

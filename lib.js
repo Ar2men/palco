@@ -136,3 +136,13 @@ export function pickPlace(results, country) {
   const inCountry = (results ?? []).filter(r => want.includes(r.country) || want.includes(r.admin1));
   return (inCountry.length ? inCountry : results ?? []).sort((a, b) => (b.population ?? 0) - (a.population ?? 0))[0];
 }
+
+// Form string and closing odds (decimal) that the scoreboard carries for each match, for the AI context.
+const ml = v => v === 'EVEN' ? 2 : v == null || v === '' || Number.isNaN(Number(v)) ? null : decimalOdds(Number(v));
+export function eventExtras(e) {
+  const c = e.competitions?.[0] ?? {};
+  const form = Object.fromEntries((c.competitors ?? []).map(t => [t.homeAway, t.form ?? '']));
+  const o = c.odds?.[0];
+  const odds = o?.moneyline ? { home: ml(o.moneyline.home?.close?.odds), draw: ml(o.drawOdds?.moneyLine), away: ml(o.moneyline.away?.close?.odds), total: o.overUnder ?? null } : null;
+  return { form, odds };
+}

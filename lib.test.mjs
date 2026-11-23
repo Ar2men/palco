@@ -60,3 +60,13 @@ assert.equal(pickPlace(towns, 'England').country, 'United Kingdom');
 assert.equal(pickPlace(towns, 'Narnia').population, 27000);
 assert.equal(pickPlace([], 'Mexico'), undefined);
 console.log('match helpers ok');
+
+import { eventExtras } from './lib.js';
+const ex = eventExtras({ competitions: [{ competitors: [{ homeAway: 'home', form: 'WWDWL' }, { homeAway: 'away', form: 'LLWDW' }],
+  odds: [{ overUnder: 3.5, drawOdds: { moneyLine: 400 }, moneyline: { home: { close: { odds: '-195' } }, away: { close: { odds: 'EVEN' } } } }] }] });
+assert.deepEqual(ex.form, { home: 'WWDWL', away: 'LLWDW' });
+assert.equal(ex.odds.home.toFixed(2), '1.51');
+assert.equal(ex.odds.draw, 5);
+assert.equal(ex.odds.away, 2);
+assert.equal(eventExtras({ competitions: [{}] }).odds, null);
+console.log('extras ok');

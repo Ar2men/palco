@@ -34,30 +34,32 @@ Edita los archivos, haz `git push` y espera ~1 minuto. Para ver la versión nuev
 
 ## Analista IA (pestaña "Analista")
 
-Un chat que analiza tus partidos como Prisma: busca en la web forma, bajas y momios, y responde con probabilidades,
-cuota justa y una opción de bajo riesgo y una arriesgada. Usa **Claude Opus 5.5** con búsqueda web.
+Un chat que analiza tus partidos al estilo Prisma: probabilidades, cuota justa, valor frente a los momios y una opción de
+bajo riesgo y una arriesgada. Usa **Gemini (`gemini-3.8-flash`) en su capa gratis**: no cuesta nada.
 Quien use la app **no pone ninguna clave**: la IA corre en un servidor propio (carpeta `worker/`, Cloudflare Workers, gratis)
-que guarda la clave de Anthropic como secreto. La app nunca la ve.
+que guarda la clave de Gemini como secreto. La app nunca la ve.
+
+Límites de la capa gratis:
+- **Sin búsqueda en internet** (la búsqueda de Google no es gratis en los modelos actuales). Para compensar, Palco le manda
+  los datos reales de ESPN: forma, tabla, cara a cara, momios de DraftKings, goleadores y alineaciones.
+  Lo que no está en esos datos (lesiones, córners, tarjetas) lo marca como "sin dato".
+- Cuota diaria limitada por Google; si se acaba, el analista deja de responder hasta el día siguiente.
+- Google puede usar las conversaciones de la capa gratis para mejorar sus productos.
 
 Publicar el servidor (una sola vez, desde la carpeta `worker/`):
 ```powershell
 npm install
 ```
 ```powershell
-npx wrangler login
+npx.cmd wrangler login
 ```
 ```powershell
-npm run deploy
+npx.cmd wrangler deploy
 ```
 ```powershell
-npx wrangler secret put ANTHROPIC_API_KEY
+npx.cmd wrangler secret put GEMINI_API_KEY
 ```
-El último comando te pide la clave (créala en console.anthropic.com → API Keys); pégala ahí, no en el código.
-`npm run deploy` te da una URL `https://palco-ia.<tu-subdominio>.workers.dev`: ponla en `AI_URL` dentro de `app.js`.
-
-**Cuesta dinero por uso**, a tu cuenta de Anthropic: unos centavos de dólar por respuesta con búsquedas.
-Pon un límite de gasto mensual en la consola de Anthropic: es el tope real. El servidor solo acepta peticiones
-desde tu página y máximo 6 preguntas por minuto por persona.
+La clave gratis se crea en **aistudio.google.com → Get API key**. Pégala cuando la pida el último comando, no en el código.
 
 ## Probarla en tu computadora
 
