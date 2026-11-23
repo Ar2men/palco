@@ -1,0 +1,55 @@
+{
+ "_about": "Palco, tema oscuro (prefers-color-scheme: dark).",
+ "color": {
+  "bg": "#0f1c15",
+  "surface": "#16261d",
+  "text": "#e6efe8",
+  "text-muted": "#93a89b",
+  "turf": "#1f5a3a",
+  "on-turf": "#ffffff",
+  "live": "#f2c230",
+  "yellow": "#f2c230",
+  "red": "#d6402b",
+  "focus": "#f2c230"
+ },
+ "pairs": [
+  [
+   "text",
+   "bg"
+  ],
+  [
+   "text",
+   "surface"
+  ],
+  [
+   "text-muted",
+   "bg"
+  ],
+  [
+   "text-muted",
+   "surface"
+  ],
+  [
+   "on-turf",
+   "turf"
+  ],
+  [
+   "live",
+   "bg"
+  ],
+  [
+   "yellow",
+   "surface"
+  ],
+  [
+   "red",
+   "surface",
+   "ui"
+  ],
+  [
+   "focus",
+   "bg",
+   "ui"
+  ]
+ ]
+}

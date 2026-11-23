@@ -1,0 +1,16 @@
+{
+ "name": "Palco",
+ "avoid": [
+  "SofaScore",
+  "Sofa Score",
+  "Sofascore"
+ ],
+ "domains": [
+  "sofascore.com",
+  "sofascore.app"
+ ],
+ "colors": [
+  "#374df5"
+ ],
+ "_note": "#374df5 es el azul de SofaScore aproximado (no verificado en su CSS)."
+}
