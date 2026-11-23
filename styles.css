@@ -331,6 +331,7 @@ main { padding: 0 var(--gutter) 24px; outline: none; }
 .md-table table { border-collapse: collapse; font-size: 0.85rem; font-variant-numeric: tabular-nums; min-width: 100%; }
 .md-table th { text-align: left; font-weight: 600; border-bottom: 2px solid var(--turf); padding: 4px 8px 4px 0; }
 .md-table td { border-bottom: 1px solid var(--line); padding: 5px 8px 5px 0; }
+.bubble.ai .md-table th, .bubble.ai .md-table td { white-space: nowrap; }
 .thinking { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 0.9rem; }
 .thinking .loading { padding: 0; }
 .thinking p { margin: 0; }
