@@ -108,3 +108,31 @@ export function md(text) {
   flush();
   return out.join('');
 }
+
+// Lineup on a pitch: ESPN gives position codes (RB, CD-L, CM, LF...), not coordinates.
+// Rows go from goalkeeper (first) to attack (last); each row sorted left to right.
+const ROW = a => a === 'G' ? 0
+  : /^(R|L)?(CD|CB|B|D|WB|SW)(-[LR])?$|^[RL]WB$|^[RL]B$/.test(a) ? 1
+  : /^(F|S|ST|CF|RF|LF)(-[LR])?$/.test(a) ? 5
+  : /^(DM|CDM)/.test(a) ? 2 : /^AM/.test(a) ? 4 : 3;
+const SIDE = a => /-L$/.test(a) ? 0.3 : /-R$/.test(a) ? 0.7 : /^L/.test(a) && a.length > 1 ? 0 : /^R/.test(a) && a.length > 1 ? 1 : 0.5;
+export function pitchRows(starters) {
+  const rows = [];
+  for (const p of starters) (rows[ROW(p.pos ?? '')] ??= []).push(p);
+  return rows.filter(Boolean).map(r => r.sort((a, b) => SIDE(a.pos ?? '') - SIDE(b.pos ?? '')));
+}
+
+// American moneyline (+135 / -150) -> decimal odds.
+export const decimalOdds = ml => ml > 0 ? 1 + ml / 100 : 1 + 100 / Math.abs(ml);
+
+// WMO weather code -> Spanish text.
+export const weatherText = c => c === 0 ? 'Despejado' : c <= 2 ? 'Parcialmente nublado' : c === 3 ? 'Nublado'
+  : c <= 48 ? 'Niebla' : c <= 57 ? 'Llovizna' : c <= 67 ? 'Lluvia' : c <= 77 ? 'Nieve' : c <= 82 ? 'Chubascos' : 'Tormenta';
+
+// Geocoding returns same-name towns worldwide; keep the one in the venue's country, then the biggest.
+const COUNTRY_ALIAS = { England: 'United Kingdom', Scotland: 'United Kingdom', Wales: 'United Kingdom', USA: 'United States' };
+export function pickPlace(results, country) {
+  const want = [country, COUNTRY_ALIAS[country]].filter(Boolean);
+  const inCountry = (results ?? []).filter(r => want.includes(r.country) || want.includes(r.admin1));
+  return (inCountry.length ? inCountry : results ?? []).sort((a, b) => (b.population ?? 0) - (a.population ?? 0))[0];
+}

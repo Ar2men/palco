@@ -36,13 +36,28 @@ Edita los archivos, haz `git push` y espera ~1 minuto. Para ver la versión nuev
 
 Un chat que analiza tus partidos como Prisma: busca en la web forma, bajas y momios, y responde con probabilidades,
 cuota justa y una opción de bajo riesgo y una arriesgada. Usa **Claude Opus 5.5** con búsqueda web.
+Quien use la app **no pone ninguna clave**: la IA corre en un servidor propio (carpeta `worker/`, Cloudflare Workers, gratis)
+que guarda la clave de Anthropic como secreto. La app nunca la ve.
 
-1. Crea una clave en **console.anthropic.com → API Keys** y agrega crédito.
-2. En la app: **Ajustes → Analista IA**, pega la clave y toca **Guardar**.
+Publicar el servidor (una sola vez, desde la carpeta `worker/`):
+```powershell
+npm install
+```
+```powershell
+npx wrangler login
+```
+```powershell
+npm run deploy
+```
+```powershell
+npx wrangler secret put ANTHROPIC_API_KEY
+```
+El último comando te pide la clave (créala en console.anthropic.com → API Keys); pégala ahí, no en el código.
+`npm run deploy` te da una URL `https://palco-ia.<tu-subdominio>.workers.dev`: ponla en `AI_URL` dentro de `app.js`.
 
-La clave se guarda solo en tu teléfono y solo se envía a Anthropic; no está en este repositorio.
-**Cuesta dinero por uso:** cada respuesta con búsquedas sale en unos centavos de dólar. Pon un límite de gasto
-mensual en la consola de Anthropic. Si alguien usa tu teléfono, puede usar tu clave: bórrala desde Ajustes cuando quieras.
+**Cuesta dinero por uso**, a tu cuenta de Anthropic: unos centavos de dólar por respuesta con búsquedas.
+Pon un límite de gasto mensual en la consola de Anthropic: es el tope real. El servidor solo acepta peticiones
+desde tu página y máximo 6 preguntas por minuto por persona.
 
 ## Probarla en tu computadora
 

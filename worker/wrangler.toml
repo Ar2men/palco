@@ -1,0 +1,14 @@
+# Servidor intermedio del Analista IA de Palco (Cloudflare Workers).
+# La clave de Anthropic NO va aquí: se guarda como secreto con `npx wrangler secret put ANTHROPIC_API_KEY`.
+name = "palco-ia"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Límite por IP: 6 preguntas por minuto.
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+  [ratelimits.simple]
+  limit = 6
+  period = 60

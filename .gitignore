@@ -1,2 +1,5 @@
 .claude/
 __pycache__/
+worker/node_modules/
+worker/dist/
+worker/.wrangler/

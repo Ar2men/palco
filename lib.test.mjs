@@ -46,3 +46,17 @@ assert.match(t, /<th>Mercado<\/th>.*<td>55%<\/td>/);
 assert.ok(!t.includes('---'));
 assert.match(t, /<ul><li>uno<\/li><li>dos<\/li><\/ul>/);
 console.log('md ok');
+
+import { pitchRows, decimalOdds, weatherText, pickPlace } from './lib.js';
+// 4-4-2 as ESPN sends it (formationPlace order mixes lines)
+const xi = ['G', 'RB', 'LB', 'CM', 'CD-R', 'CD-L', 'RM', 'LM', 'F', 'RF', 'LF'].map(pos => ({ pos }));
+assert.deepEqual(pitchRows(xi).map(r => r.map(p => p.pos)), [['G'], ['LB', 'CD-L', 'CD-R', 'RB'], ['LM', 'CM', 'RM'], ['LF', 'F', 'RF']]);
+assert.deepEqual(pitchRows([{ pos: 'DM' }, { pos: 'AM-L' }, { pos: 'G' }]).map(r => r.map(p => p.pos)), [['G'], ['DM'], ['AM-L']]);
+assert.equal(decimalOdds(135).toFixed(2), '2.35');
+assert.equal(decimalOdds(-150).toFixed(2), '1.67');
+assert.equal(weatherText(63), 'Lluvia');
+const towns = [{ name: 'Brentford', country: 'United States', population: 78 }, { name: 'Brentford', country: 'United Kingdom', admin1: 'England', population: 27000 }];
+assert.equal(pickPlace(towns, 'England').country, 'United Kingdom');
+assert.equal(pickPlace(towns, 'Narnia').population, 27000);
+assert.equal(pickPlace([], 'Mexico'), undefined);
+console.log('match helpers ok');

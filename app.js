@@ -1,5 +1,5 @@
 import { LEAGUES, DEFAULT_LEAGUES, ymd, addDays, datesAround, uniqueEvents, eventsForDay,
-  simplifyEvent, simplifyStandings, statusLabel, moveItem, md } from './lib.js';
+  simplifyEvent, simplifyStandings, statusLabel, moveItem, md, pitchRows, decimalOdds, weatherText, pickPlace } from './lib.js';
 
 // shortcut: ESPN's public API is unofficial and undocumented; if it changes, only get()/the views below need fixing.
 const API = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
@@ -164,17 +164,17 @@ async function viewMatch(lg, id, quiet) {
       <span class="bar"><i style="width:${(a / tot) * 100}%"></i><i style="width:${(b / tot) * 100}%"></i></span></li>`;
   }).join('');
 
-  // Before kickoff ESPN sends the teams without a roster list.
-  const lineup = (d.rosters ?? []).filter(r => r.roster?.length).map(r => {
-    const list = (arr) => arr.map(p => `<li><span class="num">${esc(p.jersey)}</span>${esc(p.athlete?.displayName)}
-      <span class="pos">${esc(p.position?.abbreviation)}</span>${p.subbedOut ? '<i class="out" aria-label="salió"></i>' : ''}${p.subbedIn ? '<i class="in" aria-label="entró"></i>' : ''}</li>`).join('');
-    const starters = r.roster.filter(p => p.starter), subs = r.roster.filter(p => !p.starter);
-    return `<div class="lineup"><h3>${img(r.team.logo || r.team.logos?.[0]?.href)} ${esc(r.team.shortDisplayName || r.team.displayName)} ${r.formation ? `<small>${esc(r.formation)}</small>` : ''}</h3>
-      <ol>${list(starters)}</ol>${subs.length ? `<h4>Suplentes</h4><ol>${list(subs)}</ol>` : ''}</div>`;
-  }).join('');
+  // Before kickoff ESPN sends the teams without a roster list; then we show a probable XI instead.
+  const rosters = (d.rosters ?? []).filter(r => r.roster?.length);
+  const lineup = rosters.map(r => lineupBlock(r.team, r.formation, r.roster, 'Alineación confirmada')).join('');
+  const players = rosters.map(playersTable).join('');
 
   const statusText = state === 'pre' ? `${fmtDay(new Date(comp.date))}, ${fmtTime(comp.date)}` : statusLabel(comp.status);
-  const venue = d.gameInfo?.venue?.fullName;
+  const venue = d.gameInfo?.venue;
+  const tab = matchTab.get(id) ?? (state === 'pre' ? 'previa' : 'resumen');
+  const tabs = [['previa', 'Previa'], ['resumen', 'Resumen'], ['stats', 'Estadísticas'], ['jugadores', 'Jugadores'], ['alineaciones', 'Alineaciones']];
+  const panel = (key, html) => `<section data-panel="${key}" ${key === tab ? '' : 'hidden'}>${html}</section>`;
+  const ask = `Analiza ${home.team.displayName} vs ${away.team.displayName} (${leagueName(lg)}, ${fmtDay(new Date(comp.date))} ${fmtTime(comp.date)})`;
   main.innerHTML = `
   <article class="match-view">
     <header class="pitch">
@@ -188,17 +188,128 @@ async function viewMatch(lg, id, quiet) {
       <p class="status ${state}">${esc(statusText)}</p>
       ${noSpoil && state !== 'pre' ? '<button class="reveal-btn" type="button">Mostrar marcador</button>' : ''}
     </header>
-    <div class="seg" role="tablist">
-      <button role="tab" aria-selected="true" data-tab="resumen">Resumen</button>
-      <button role="tab" aria-selected="false" data-tab="stats">Estadísticas</button>
-      <button role="tab" aria-selected="false" data-tab="alineaciones">Alineaciones</button>
-    </div>
-    <section data-panel="resumen">${events ? `<ol class="timeline spoiler">${events}</ol>` : `<p class="note">${state === 'pre' ? 'El partido no ha empezado.' : 'Sin eventos todavía.'}</p>`}
-      ${venue ? `<p class="venue">${esc(venue)}</p>` : ''}</section>
-    <section data-panel="stats" hidden>${stats ? `<ul class="stats spoiler">${stats}</ul>` : '<p class="note">Las estadísticas aparecen cuando empieza el partido.</p>'}</section>
-    <section data-panel="alineaciones" hidden>${lineup || '<p class="note">Las alineaciones se publican más o menos una hora antes del partido.</p>'}</section>
+    <div class="seg" role="tablist" data-match="${esc(id)}">${tabs.map(([k, label]) =>
+      `<button role="tab" aria-selected="${k === tab}" data-tab="${k}">${label}</button>`).join('')}</div>
+    ${panel('previa', previa(d, home, away, ask))}
+    ${panel('resumen', events ? `<ol class="timeline spoiler">${events}</ol>` : `<p class="note">${state === 'pre' ? 'El partido no ha empezado.' : 'Sin eventos todavía.'}</p>`)}
+    ${panel('stats', stats ? `<ul class="stats spoiler">${stats}</ul>` : '<p class="note">Las estadísticas aparecen cuando empieza el partido.</p>')}
+    ${panel('jugadores', players ? `<div class="spoiler">${players}</div>` : '<p class="note">Las estadísticas de cada jugador aparecen cuando empieza el partido.</p>')}
+    ${panel('alineaciones', lineup || '<div data-probable><p class="note">Buscando la alineación probable…</p></div>')}
   </article>`;
+  if (!lineup) probableLineups(d, [home, away]).then(html => { const el = main.querySelector('[data-probable]'); if (el) el.innerHTML = html; });
+  if (venue) weatherFor(venue, comp.date).then(txt => { const el = main.querySelector('[data-weather]'); if (el && txt) el.textContent = txt; });
   if (state === 'in') timer = setTimeout(() => !document.hidden && route(true), 30000);
+}
+
+const matchTab = new Map(); // remembers the open tab per match across live refreshes
+const extrasCache = new Map();
+const cached = (key, fn) => { if (!extrasCache.has(key)) extrasCache.set(key, fn().catch(err => { extrasCache.delete(key); throw err; })); return extrasCache.get(key); };
+// ESPN leaves out stats that don't apply (e.g. offsides for goalkeepers): default them to 0.
+const PSTATS = ['totalGoals', 'goalAssists', 'totalShots', 'shotsOnTarget', 'foulsCommitted', 'offsides', 'yellowCards', 'redCards'];
+const statOf = p => ({ ...Object.fromEntries(PSTATS.map(k => [k, 0])), ...Object.fromEntries((p.stats ?? []).map(s => [s.name, Number(s.value) || 0])) });
+const short = a => a?.shortName || a?.displayName || '?';
+
+function lineupBlock(team, formation, roster, label) {
+  const starters = roster.filter(p => p.starter).map(p => ({ ...p, pos: p.position?.abbreviation }));
+  const subs = roster.filter(p => !p.starter);
+  const marks = p => { const s = statOf(p);
+    return '⚽'.repeat(s.totalGoals || 0) + (s.yellowCards ? '<i class="mk y"></i>' : '') + (s.redCards ? '<i class="mk r"></i>' : '') + (p.subbedOut ? '<i class="mk out" aria-label="salió"></i>' : ''); };
+  const rows = pitchRows(starters).map(r => `<div class="xi-row">${r.map(p =>
+    `<div class="pl"><span class="shirt">${esc(p.jersey)}</span><span class="pname">${esc(short(p.athlete))}</span><span class="marks">${marks(p)}</span></div>`).join('')}</div>`).join('');
+  return `<div class="lineup"><h3>${img(team.logo || team.logos?.[0]?.href)} ${esc(team.shortDisplayName || team.displayName)} ${formation ? `<small>${esc(formation)}</small>` : ''}</h3>
+    <p class="xi-label">${esc(label)}</p><div class="xi">${rows}</div>
+    ${subs.length ? `<h4>Suplentes</h4><ol>${subs.map(p => `<li><span class="num">${esc(p.jersey)}</span>${esc(p.athlete?.displayName)}
+      <span class="pos">${esc(p.position?.abbreviation)}</span>${p.subbedIn ? '<i class="in" aria-label="entró"></i>' : ''}</li>`).join('')}</ol>` : ''}</div>`;
+}
+
+function playersTable(r) {
+  const played = r.roster.filter(p => p.starter || p.subbedIn).map(p => ({ p, s: statOf(p) }))
+    .sort((a, b) => b.s.totalGoals - a.s.totalGoals || b.s.goalAssists - a.s.goalAssists || b.s.shotsOnTarget - a.s.shotsOnTarget || b.s.totalShots - a.s.totalShots);
+  return `<h3 class="group">${img(r.team.logo || r.team.logos?.[0]?.href)} ${esc(r.team.shortDisplayName || r.team.displayName)}</h3>
+  <div class="md-table"><table class="ptable"><thead><tr><th class="l">Jugador</th><th title="Goles">G</th><th title="Asistencias">A</th><th title="Tiros">Tir</th><th title="Tiros a puerta">Pta</th><th title="Faltas cometidas">Fal</th><th title="Fueras de lugar">FL</th><th title="Tarjetas">Tj</th></tr></thead>
+  <tbody>${played.map(({ p, s }) => `<tr${s.totalGoals || s.goalAssists ? ' class="hot"' : ''}><td class="l"><span class="num">${esc(p.jersey)}</span> ${esc(short(p.athlete))}${p.subbedIn ? ' <i class="in" aria-label="entró"></i>' : ''}</td>
+    <td>${s.totalGoals}</td><td>${s.goalAssists}</td><td>${s.totalShots}</td><td>${s.shotsOnTarget}</td><td>${s.foulsCommitted}</td><td>${s.offsides}</td>
+    <td>${s.redCards ? '<i class="mk r"></i>' : s.yellowCards ? '<i class="mk y"></i>' : ''}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+// Probable XI = the starting eleven each team used in its last finished match.
+async function probableLineups(d, sides) {
+  const blocks = await Promise.all(sides.map(async c => {
+    const games = d.lastFiveGames?.find(t => t.team.id === c.team.id)?.events ?? [];
+    const last = [...games].sort((a, b) => (b.gameDate ?? '').localeCompare(a.gameDate ?? ''))[0];
+    if (!last) return '';
+    try {
+      const s = await cached(`sum:${last.id}`, () => get(`${API}/all/summary?event=${encodeURIComponent(last.id)}`));
+      const r = s.rosters?.find(x => x.team.id === c.team.id && x.roster?.length);
+      return r ? lineupBlock(r.team, r.formation, r.roster.filter(p => p.starter).map(p => ({ ...p, subbedIn: false, subbedOut: false, stats: [] })),
+        `Probable: titulares de su último partido (${last.atVs === '@' ? 'en' : 'vs'} ${last.opponent?.displayName ?? ''}, ${new Date(last.gameDate).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })})`) : '';
+    } catch { return ''; }
+  }));
+  return blocks.join('') || '<p class="note">Todavía no hay alineaciones. Se publican más o menos una hora antes del partido.</p>';
+}
+
+function previa(d, home, away, ask) {
+  const form = c => {
+    const t = d.lastFiveGames?.find(x => x.team.id === c.team.id);
+    if (!t?.events?.length) return '';
+    const ev = [...t.events].sort((a, b) => (b.gameDate ?? '').localeCompare(a.gameDate ?? ''));
+    const res = { W: ['G', 'w'], D: ['E', 'd'], L: ['P', 'l'] };
+    return `<div class="form"><h4>${img(c.team.logos?.[0]?.href || c.team.logo)} ${esc(c.team.shortDisplayName || c.team.displayName)}
+      <span class="chips-f">${ev.map(e => `<i class="r-${res[e.gameResult]?.[1] ?? 'd'}">${res[e.gameResult]?.[0] ?? '–'}</i>`).join('')}</span></h4>
+      <ul>${ev.map(e => `<li><span>${esc(new Date(e.gameDate).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }))}</span>
+        <span>${e.atVs === '@' ? 'en' : 'vs'} ${esc(e.opponent?.displayName)}</span><b>${esc(e.score)}</b></li>`).join('')}</ul></div>`;
+  };
+  const h2h = d.seasonseries?.find(s => s.type === 'head-to-head')?.events?.filter(e => e.statusType?.completed) ?? [];
+  const tally = { home: 0, draw: 0, away: 0 };
+  const h2hRows = h2h.map(e => {
+    const h = e.competitors.find(c => c.homeAway === 'home'), a = e.competitors.find(c => c.homeAway === 'away');
+    const diff = Number(h.score) - Number(a.score);
+    const winner = diff === 0 ? null : diff > 0 ? h.team.id : a.team.id;
+    tally[winner === home.team.id ? 'home' : winner === away.team.id ? 'away' : 'draw']++;
+    return `<li><span>${esc(new Date(e.date).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: '2-digit' }))}</span>
+      <span>${esc(h.team.shortDisplayName || h.team.displayName)} <b>${esc(h.score)}–${esc(a.score)}</b> ${esc(a.team.shortDisplayName || a.team.displayName)}</span></li>`;
+  }).join('');
+  const pc = d.pickcenter?.[0];
+  let odds = '';
+  if (pc?.homeTeamOdds?.moneyLine && pc?.awayTeamOdds?.moneyLine) {
+    const o = [['Local', pc.homeTeamOdds.moneyLine], ['Empate', pc.drawOdds?.moneyLine], ['Visita', pc.awayTeamOdds.moneyLine]].filter(x => x[1]);
+    const dec = o.map(([, ml]) => decimalOdds(ml)), sum = dec.reduce((s, x) => s + 1 / x, 0);
+    odds = `<h3 class="group">Momios <small>${esc(pc.provider?.name ?? '')}</small></h3><div class="odds">${o.map(([label], i) =>
+      `<div><span>${label}</span><b>${dec[i].toFixed(2)}</b><small>${Math.round(100 / dec[i] / sum)}%</small></div>`).join('')}</div>
+      ${pc.overUnder ? `<p class="note">Línea de goles: ${esc(pc.overUnder)} · Más ${pc.overOdds ? decimalOdds(pc.overOdds).toFixed(2) : '–'} · Menos ${pc.underOdds ? decimalOdds(pc.underOdds).toFixed(2) : '–'}</p>` : ''}`;
+  }
+  const NAMES = { goalsLeaders: 'Goleador', assistsLeaders: 'Asistencias' };
+  const leaders = (d.leaders ?? []).map(t => {
+    const rows = (t.leaders ?? []).filter(c => NAMES[c.name] && c.leaders?.[0]).map(c =>
+      `<li><span>${NAMES[c.name]}</span><span>${esc(short(c.leaders[0].athlete))}</span><b>${esc((c.leaders[0].displayValue ?? '').replace('Matches', 'PJ').replace('Goals', 'Goles').replace('Assists', 'Asist.'))}</b></li>`).join('');
+    return rows ? `<div class="form"><h4>${img(t.team?.logo)} ${esc(t.team?.displayName)}</h4><ul>${rows}</ul></div>` : '';
+  }).join('');
+  const v = d.gameInfo?.venue;
+  return `
+    <button class="btn ai-btn" type="button" data-ai-ask="${esc(ask)}">Analizar este partido con IA</button>
+    ${v ? `<h3 class="group">Estadio</h3><p class="venue-info"><b>${esc(v.fullName)}</b><br>${esc([v.address?.city, v.address?.country].filter(Boolean).join(', '))}
+      <br><span data-weather class="note">Clima: consultando…</span></p>` : ''}
+    <h3 class="group">Forma (últimos 5)</h3>${form(home) + form(away) || '<p class="note">Sin datos de forma.</p>'}
+    <h3 class="group">Cara a cara</h3>${h2hRows ? `<p class="h2h-tally"><b>${tally.home}</b> ${esc(home.team.shortDisplayName || home.team.displayName)} · <b>${tally.draw}</b> empates · <b>${tally.away}</b> ${esc(away.team.shortDisplayName || away.team.displayName)}</p><ul class="h2h">${h2hRows}</ul>` : '<p class="note">Sin enfrentamientos recientes registrados.</p>'}
+    ${odds}
+    ${leaders ? `<h3 class="group">Figuras de la temporada</h3>${leaders}` : ''}`;
+}
+
+async function weatherFor(venue, iso) {
+  const city = venue.address?.city;
+  if (!city) return 'Clima: sin dato';
+  try {
+    const g = await cached(`geo:${city}`, () => fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=10&language=en`).then(r => r.json()));
+    const place = pickPlace(g.results, venue.address?.country);
+    if (!place) return 'Clima: sin dato';
+    const day = iso.slice(0, 10);
+    const w = await cached(`wx:${place.id}:${day}`, () => fetch(`https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}` +
+      `&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m&timezone=UTC&start_date=${day}&end_date=${day}`).then(r => r.json()));
+    const h = new Date(iso).getUTCHours(), hr = w.hourly;
+    if (!hr?.time?.length) return 'Clima: el pronóstico sale unos 15 días antes del partido';
+    return `Clima a la hora del partido: ${weatherText(hr.weather_code[h])}, ${Math.round(hr.temperature_2m[h])} °C, ` +
+      `lluvia ${hr.precipitation_probability[h] ?? 0}%, viento ${Math.round(hr.wind_speed_10m[h])} km/h`;
+  } catch { return 'Clima: sin dato'; }
 }
 
 function viewSettings() {
@@ -217,34 +328,16 @@ function viewSettings() {
     <h2>Preferencias</h2>
     <label class="row"><span>Formato de 12 horas</span><input type="checkbox" id="h12" ${h12 ? 'checked' : ''}></label>
     <label class="row"><span>Ocultar marcadores (sin spoilers)</span><input type="checkbox" id="nospoil-set" ${noSpoil ? 'checked' : ''}></label>
-    <h2>Analista IA</h2>
-    <p class="hint">Usa tu clave de API de Claude (console.anthropic.com → API Keys). Se guarda solo en este teléfono y
-      solo se envía a Anthropic. Cada respuesta cuesta unos centavos de dólar: pon un límite de gasto en tu cuenta.</p>
-    <form class="key-form" data-key-form>
-      <input type="password" name="key" autocomplete="off" placeholder="${apiKey ? 'Clave guardada ••••' + esc(apiKey.slice(-4)) : 'sk-ant-…'}" aria-label="Clave de API de Claude">
-      <button class="btn" type="submit">Guardar</button>
-      ${apiKey ? '<button type="button" class="link" data-key-clear>Borrar clave</button>' : ''}
-    </form>
     <p class="about">Palco no tiene anuncios, cuenta ni rastreo. Datos: API pública de ESPN. Análisis: Claude (Anthropic).</p>
   </div>`;
 }
 
 /* ---------- analista IA ---------- */
 
-// shortcut: the SDK is loaded from a CDN on first use; pin a newer version here when you want new API features.
-const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.7.0/+esm';
-const SYSTEM = `Eres el analista de fútbol de Palco, la app personal del usuario. Respondes en español, directo y conciso.
-Tu trabajo: analizar los partidos que te pida y darle las mejores recomendaciones con probabilidades reales.
-- Antes de estimar, busca con web_search lo que importa: forma reciente, bajas y lesiones, alineación probable, tabla, xG si aparece y momios de varias casas. Primero los datos que encontraste, después las probabilidades.
-- Usa solo datos de confianza media o alta. Lo que no aparezca: "sin dato". Nunca inventes estadísticas.
-- Da probabilidades en %, la cuota justa (1 / probabilidad) y, si encontraste momios, di dónde hay valor.
-- Cuando analices un partido cubre: 1X2, goles (más/menos), ambos anotan, hándicap asiático, y córners, tarjetas y goleador si hay datos.
-- Cierra con una opción de bajo riesgo y una arriesgada, cada una con su probabilidad real.
-- Formato: tablas cortas en Markdown y un resumen de 1 o 2 líneas al final. Di "apuestas", nunca "piernas".
-- Son estimaciones, no garantías: nunca digas que algo se gana seguro y recuérdale apostar solo lo que puede perder.
-Cada mensaje del usuario empieza con <contexto>: la fecha y los partidos de sus ligas según ESPN, en su hora local. Úsalo como punto de partida.`;
+// The analyst runs on Palco's own server (worker/ in this repo): the Anthropic key lives there, never in the app.
+// After `npm run deploy` in worker/, put the Worker's URL here.
+const AI_URL = 'https://palco-ia.REEMPLAZAR.workers.dev';
 
-let apiKey = load('claveIA', '');
 let chatApi = load('chatApi', []);   // exact messages sent to the API (thinking and search blocks included)
 let chatView = load('chatView', []); // what the user sees: { role, text }
 let chatBusy = false;
@@ -264,10 +357,6 @@ async function matchContext() {
 
 function renderChat(note = '') {
   if (location.hash !== '#/ia') return;
-  if (!apiKey) {
-    main.innerHTML = `<div class="empty"><p>Para usar el analista, guarda tu clave de API de Claude.</p><a class="btn" href="#/ajustes">Ir a Ajustes</a></div>`;
-    return;
-  }
   const msgs = chatView.map(m => m.role === 'user'
     ? `<div class="bubble user">${esc(m.text)}</div>` : `<div class="bubble ai">${md(m.text)}</div>`).join('');
   const ideas = ['¿Qué partidos de hoy tienen más valor?', 'Analiza el próximo partido de la Liga MX', 'Dame una opción de bajo riesgo para hoy'];
@@ -293,31 +382,18 @@ async function sendChat(text) {
   renderChat();
   let note = '';
   try {
-    const [{ default: Anthropic }, ctx] = await Promise.all([import(SDK_URL), matchContext()]);
-    const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
-    chatApi.push({ role: 'user', content: `${ctx}\n\n${text}` });
-    let reply = '', res;
+    chatApi.push({ role: 'user', content: `${await matchContext()}\n\n${text}` });
+    let res;
     try {
-      for (let i = 0; i < 5; i++) {
-        res = await client.beta.messages.create({
-          model: 'claude-opus-5-5',
-          max_tokens: 16000,
-          output_config: { effort: 'medium' },
-          // On a safety decline the API retries the request on another model by itself.
-          betas: ['server-side-fallback-2026-07-01'],
-          fallbacks: 'default',
-          system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
-          tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 6 }],
-          messages: chatApi,
-        });
-        chatApi.push({ role: 'assistant', content: res.content }); // sent back unchanged next turn
-        reply += res.content.filter(b => b.type === 'text').map(b => b.text).join('');
-        if (res.stop_reason !== 'pause_turn') break; // long web searches pause; resending continues them
-      }
+      const r = await fetch(AI_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messages: chatApi }) });
+      res = await r.json().catch(() => ({}));
+      if (!r.ok) throw Object.assign(new Error(res.message ?? res.error ?? 'error'), { status: r.status });
     } catch (err) {
       chatApi.length = before;
       throw err;
     }
+    chatApi.push(...res.messages); // assistant turns returned unchanged, sent back with the next question
+    const reply = res.messages.flatMap(m => m.content).filter(b => b.type === 'text').map(b => b.text).join('');
     if (res.stop_reason === 'refusal') {
       chatApi.length = before;
       chatView.pop();
@@ -329,11 +405,10 @@ async function sendChat(text) {
     console.error(err);
     chatView.pop();
     const s = err?.status;
-    note = s === 401 ? 'Tu clave de API no es válida. Revísala en Ajustes.'
-      : s === 429 ? 'Demasiadas solicitudes seguidas. Espera un momento y vuelve a enviar.'
-      : s === 402 || /credit/i.test(err?.message ?? '') ? 'Tu cuenta de Anthropic no tiene saldo. Agrega créditos en console.anthropic.com.'
-      : !navigator.onLine ? 'Sin conexión a internet. Revisa tu conexión.'
-      : `El analista no pudo responder (${s ?? 'error de red'}). Vuelve a enviar.`;
+    note = !navigator.onLine ? 'Sin conexión a internet. Revisa tu conexión.'
+      : s === 429 ? 'Demasiadas preguntas seguidas. Espera un minuto y vuelve a enviar.'
+      : /credit|billing/i.test(err?.message ?? '') ? 'El analista se quedó sin saldo. Hay que agregar créditos en la cuenta de Anthropic.'
+      : `El analista no está disponible ahora (${s ?? 'sin respuesta del servidor'}). Vuelve a enviar en un momento.`;
     setTimeout(() => { const q = main.querySelector('[name=q]'); if (q) q.value = text; });
   }
   chatBusy = false;
@@ -388,20 +463,20 @@ document.addEventListener('click', e => {
     const view = t.closest('.match-view');
     view.querySelectorAll('[role=tab]').forEach(b => b.setAttribute('aria-selected', b === t));
     view.querySelectorAll('[data-panel]').forEach(p => { p.hidden = p.dataset.panel !== t.dataset.tab; });
+    matchTab.set(t.closest('[data-match]').dataset.match, t.dataset.tab);
   }
   else if (t.dataset.move != null) { myLeagues = moveItem(myLeagues, +t.dataset.move, +t.dataset.delta); save('ligas', myLeagues); viewSettings(); }
   else if (t.dataset.remove) { myLeagues = myLeagues.filter(id => id !== t.dataset.remove); save('ligas', myLeagues); viewSettings(); }
   else if (t.dataset.add) { myLeagues = [...myLeagues, t.dataset.add]; save('ligas', myLeagues); viewSettings(); }
   else if (t.dataset.ask) { sendChat(t.dataset.ask); }
+  else if (t.dataset.aiAsk) { location.hash = '#/ia'; setTimeout(() => sendChat(t.dataset.aiAsk), 0); }
   else if (t.dataset.newChat != null && !chatBusy) { chatApi = []; chatView = []; save('chatApi', []); save('chatView', []); renderChat(); }
-  else if (t.dataset.keyClear != null) { apiKey = ''; save('claveIA', ''); viewSettings(); }
 });
 
 document.addEventListener('submit', e => {
   e.preventDefault();
   const f = e.target;
   if (f.dataset.chatForm != null) sendChat(f.q.value);
-  if (f.dataset.keyForm != null && f.key.value.trim()) { apiKey = f.key.value.trim(); save('claveIA', apiKey); viewSettings(); }
 });
 
 document.addEventListener('change', e => {
