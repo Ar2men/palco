@@ -5,8 +5,9 @@
 // and Gemini's free daily quota are the real cap. Add an access token if it ever gets abused.
 const ORIGINS = ['https://ar2men.github.io', 'http://localhost:8765'];
 const MAX_BODY = 800_000;
-// Free-tier model. Google Search grounding is not free on current models, so the app sends ESPN data instead.
-const MODEL = 'gemini-3.8-flash';
+// Free-tier models, best first; the next one is tried when one is overloaded (503) or out of free quota (429).
+// Google Search grounding is not free on current models, so the app sends ESPN data instead.
+const MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
 
 const SYSTEM = `Eres el analista de fútbol de Palco, la app personal del usuario. Respondes en español, directo y conciso.
 Tu trabajo: analizar los partidos que te pida y darle las mejores recomendaciones con probabilidades realistas.
@@ -54,15 +55,18 @@ export default {
       .filter(c => c.parts[0].text);
 
     let r, data;
-    try {
-      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-        method: 'POST',
-        headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'content-type': 'application/json' },
-        body: JSON.stringify({ system_instruction: { parts: [{ text: SYSTEM }] }, contents, generationConfig: { maxOutputTokens: 8192 } }),
-      });
-      data = await r.json().catch(() => ({}));
-    } catch {
-      return json({ error: 'upstream' }, 502);
+    for (const model of MODELS) {
+      try {
+        r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: 'POST',
+          headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'content-type': 'application/json' },
+          body: JSON.stringify({ system_instruction: { parts: [{ text: SYSTEM }] }, contents, generationConfig: { maxOutputTokens: 8192 } }),
+        });
+        data = await r.json().catch(() => ({}));
+      } catch {
+        return json({ error: 'upstream' }, 502);
+      }
+      if (r.ok || ![429, 500, 503].includes(r.status)) break;
     }
     if (!r.ok) {
       const status = r.status === 429 ? 429 : [400, 401, 403].includes(r.status) ? 500 : 502;
