@@ -100,7 +100,8 @@ export function md(text) {
     if (/^\s*\|.*\|\s*$/.test(line)) { if (!table) flush(); (table ??= []).push(cells(line)); continue; }
     const h = line.match(/^#{1,6}\s+(.*)/);
     const li = line.match(/^\s*(?:[-*]|\d+\.)\s+(.*)/);
-    if (h) { flush(); out.push(`<h4>${inline(h[1])}</h4>`); }
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flush(); out.push('<hr>'); }
+    else if (h) { flush(); out.push(`<h4>${inline(h[1])}</h4>`); }
     else if (li) { if (!list) flush(); (list ??= []).push(li[1]); }
     else if (!line.trim()) flush();
     else { if (list || table) flush(); para.push(line); }

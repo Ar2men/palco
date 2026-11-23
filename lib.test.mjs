@@ -45,6 +45,7 @@ assert.match(t, /<p><b>1X2<\/b><\/p>/);
 assert.match(t, /<th>Mercado<\/th>.*<td>55%<\/td>/);
 assert.ok(!t.includes('---'));
 assert.match(t, /<ul><li>uno<\/li><li>dos<\/li><\/ul>/);
+assert.equal(md('a\n\n---\n\nb'), '<p>a</p><hr><p>b</p>');
 console.log('md ok');
 
 import { pitchRows, decimalOdds, weatherText, pickPlace } from './lib.js';
