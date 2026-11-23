@@ -205,7 +205,7 @@ const matchTab = new Map(); // remembers the open tab per match across live refr
 const extrasCache = new Map();
 const cached = (key, fn) => { if (!extrasCache.has(key)) extrasCache.set(key, fn().catch(err => { extrasCache.delete(key); throw err; })); return extrasCache.get(key); };
 // ESPN leaves out stats that don't apply (e.g. offsides for goalkeepers): default them to 0.
-const PSTATS = ['totalGoals', 'goalAssists', 'totalShots', 'shotsOnTarget', 'foulsCommitted', 'offsides', 'yellowCards', 'redCards'];
+const PSTATS = ['totalGoals', 'goalAssists', 'totalShots', 'shotsOnTarget', 'foulsCommitted', 'foulsSuffered', 'offsides', 'yellowCards', 'redCards', 'shotsFaced', 'goalsConceded'];
 const statOf = p => ({ ...Object.fromEntries(PSTATS.map(k => [k, 0])), ...Object.fromEntries((p.stats ?? []).map(s => [s.name, Number(s.value) || 0])) });
 const short = a => a?.shortName || a?.displayName || '?';
 
@@ -222,14 +222,38 @@ function lineupBlock(team, formation, roster, label) {
       <span class="pos">${esc(p.position?.abbreviation)}</span>${p.subbedIn ? '<i class="in" aria-label="entró"></i>' : ''}</li>`).join('')}</ol>` : ''}</div>`;
 }
 
+const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const posName = a => !a ? '' : a === 'G' ? 'Portero' : /^(F|S|ST|CF|RF|LF)(-[LR])?$/.test(a) ? 'Delantero'
+  : !/M/.test(a) && /(B|CD|D|SW)(-[LR])?$/.test(a) ? 'Defensa' : 'Mediocampista';
+
+// One card per player who played, with every action written out in full; most decisive first.
 function playersTable(r) {
-  const played = r.roster.filter(p => p.starter || p.subbedIn).map(p => ({ p, s: statOf(p) }))
-    .sort((a, b) => b.s.totalGoals - a.s.totalGoals || b.s.goalAssists - a.s.goalAssists || b.s.shotsOnTarget - a.s.shotsOnTarget || b.s.totalShots - a.s.totalShots);
+  const played = r.roster.filter(p => p.starter || p.subbedIn).map(p => {
+    const s = statOf(p), gk = p.position?.abbreviation === 'G';
+    const chips = [
+      s.totalGoals && `<span class="chip-s goal">⚽ ${count(s.totalGoals, 'gol', 'goles')}</span>`,
+      s.goalAssists && `<span class="chip-s strong">${count(s.goalAssists, 'asistencia', 'asistencias')}</span>`,
+      s.totalShots && `<span class="chip-s">${count(s.totalShots, 'tiro', 'tiros')}, ${s.shotsOnTarget} a puerta
+        <span class="shotbar" aria-hidden="true"><i style="width:${Math.round(100 * s.shotsOnTarget / s.totalShots)}%"></i></span></span>`,
+      gk && s.goalsConceded && `<span class="chip-s">${count(s.goalsConceded, 'gol en contra', 'goles en contra')}</span>`,
+      gk && s.shotsFaced && `<span class="chip-s">${count(s.shotsFaced, 'tiro recibido', 'tiros recibidos')}</span>`,
+      s.foulsCommitted && `<span class="chip-s">${count(s.foulsCommitted, 'falta cometida', 'faltas cometidas')}</span>`,
+      s.foulsSuffered && `<span class="chip-s">${count(s.foulsSuffered, 'falta recibida', 'faltas recibidas')}</span>`,
+      s.offsides && `<span class="chip-s">${count(s.offsides, 'fuera de lugar', 'fueras de lugar')}</span>`,
+      s.yellowCards && `<span class="chip-s"><i class="mk y"></i> Tarjeta amarilla</span>`,
+      s.redCards && `<span class="chip-s"><i class="mk r"></i> Tarjeta roja</span>`,
+    ].filter(Boolean);
+    const impact = s.totalGoals * 10 + s.goalAssists * 6 + s.shotsOnTarget * 2 + s.totalShots + (gk ? s.shotsFaced : 0);
+    return { p, s, chips, impact };
+  }).sort((a, b) => b.impact - a.impact);
+  const active = played.filter(x => x.chips.length), quiet = played.filter(x => !x.chips.length);
+  const role = p => [posName(p.position?.abbreviation), p.subbedIn && 'entró de cambio', p.subbedOut && 'salió de cambio'].filter(Boolean).join(', ');
   return `<h3 class="group">${img(r.team.logo || r.team.logos?.[0]?.href)} ${esc(r.team.shortDisplayName || r.team.displayName)}</h3>
-  <div class="md-table"><table class="ptable"><thead><tr><th class="l">Jugador</th><th title="Goles">G</th><th title="Asistencias">A</th><th title="Tiros">Tir</th><th title="Tiros a puerta">Pta</th><th title="Faltas cometidas">Fal</th><th title="Fueras de lugar">FL</th><th title="Tarjetas">Tj</th></tr></thead>
-  <tbody>${played.map(({ p, s }) => `<tr${s.totalGoals || s.goalAssists ? ' class="hot"' : ''}><td class="l"><span class="num">${esc(p.jersey)}</span> ${esc(short(p.athlete))}${p.subbedIn ? ' <i class="in" aria-label="entró"></i>' : ''}</td>
-    <td>${s.totalGoals}</td><td>${s.goalAssists}</td><td>${s.totalShots}</td><td>${s.shotsOnTarget}</td><td>${s.foulsCommitted}</td><td>${s.offsides}</td>
-    <td>${s.redCards ? '<i class="mk r"></i>' : s.yellowCards ? '<i class="mk y"></i>' : ''}</td></tr>`).join('')}</tbody></table></div>`;
+  <ul class="pcards">${active.map(({ p, s, chips }) => `<li class="pcard${s.totalGoals || s.goalAssists ? ' hot' : ''}">
+    <span class="shirt">${esc(p.jersey)}</span>
+    <div class="pinfo"><b>${esc(p.athlete?.displayName)}</b><small>${esc(role(p))}</small>
+      <div class="pstats">${chips.join('')}</div></div></li>`).join('')}</ul>
+  ${quiet.length ? `<p class="quiet">Sin acciones registradas: ${quiet.map(({ p }) => esc(short(p.athlete))).join(', ')}.</p>` : ''}`;
 }
 
 // Probable XI = the starting eleven each team used in its last finished match.

@@ -239,11 +239,26 @@ main { padding: 0 var(--gutter) 24px; outline: none; }
 .mk.out { width: 0; height: 0; border: 4px solid transparent; border-top-color: #ffb3a8; border-radius: 0; margin-top: 4px; }
 
 /* ---------- match: players, form, h2h, odds ---------- */
-.ptable { width: 100%; }
-.ptable th, .ptable td { text-align: center; }
-.ptable .l { text-align: left; white-space: nowrap; }
-.ptable tr.hot td { font-weight: 600; }
-.ptable .num { display: inline-block; width: 22px; text-align: right; margin-right: 4px; }
+.pcards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.pcard {
+  display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+}
+.pcard.hot { border-color: var(--turf); box-shadow: inset 4px 0 0 var(--turf); }
+.pcard .shirt { flex: none; background: var(--turf); color: #fff; box-shadow: none; }
+.pinfo { min-width: 0; }
+.pinfo b { display: block; font-weight: 600; line-height: 1.25; }
+.pinfo small { display: block; color: var(--muted); font-size: 0.82rem; }
+.pstats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.chip-s {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 0.84rem;
+  background: color-mix(in srgb, var(--turf) 10%, transparent);
+}
+.chip-s.goal { background: var(--turf); color: #fff; font-weight: 600; }
+.chip-s.strong { font-weight: 600; box-shadow: inset 0 0 0 1px var(--turf); }
+.shotbar { width: 36px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.shotbar i { display: block; height: 100%; background: var(--turf); }
+.quiet { color: var(--muted); font-size: 0.88rem; margin: 10px 0 0; }
 .ai-btn { width: 100%; margin: 10px 0 4px; }
 .venue-info { margin: 0; line-height: 1.5; }
 .form h4 { display: flex; align-items: center; gap: 8px; font: 600 1rem var(--display); margin: 12px 0 4px; }
