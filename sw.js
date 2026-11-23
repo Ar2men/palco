@@ -1,6 +1,6 @@
 // Network first for everything, cache as fallback: always fresh scores, and the last ones still show offline.
 // shortcut: the data cache grows by one small JSON per day/match you open; clear site data if it ever matters.
-const CACHE = 'palco-v9';
+const CACHE = 'palco-v10';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'lib.js', 'manifest.webmanifest', 'icons/icon-192.png'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });

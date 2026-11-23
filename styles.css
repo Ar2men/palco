@@ -57,12 +57,13 @@ img { display: block; }
 }
 @media (prefers-color-scheme: dark) { .top h1 { color: var(--ink); } }
 .top h1 svg { width: 26px; height: 26px; }
-#spoil {
-  border: 1px solid var(--line); background: var(--surface); border-radius: 999px;
-  height: 36px; padding: 0 12px; display: flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer;
+#status {
+  display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); border-radius: 999px; font-size: 0.8rem; color: var(--muted);
 }
-#spoil svg { width: 18px; height: 18px; }
-#spoil[aria-pressed="true"] { background: var(--ink); color: var(--chalk); border-color: var(--ink); }
+#status i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+#status.live { color: var(--live); border-color: color-mix(in srgb, var(--yellow) 60%, var(--line)); font-weight: 600; }
+#status.live i { background: var(--yellow); animation: pulse 1.6s ease-in-out infinite; }
 
 /* ---------- day strip ---------- */
 .days {
@@ -125,10 +126,39 @@ main { padding: 0 var(--gutter) 24px; outline: none; }
 .loading span:nth-child(2) { animation-delay: 0.15s; }
 .loading span:nth-child(3) { animation-delay: 0.3s; }
 
-/* ---------- spoiler mode ---------- */
-.nospoil .spoiler { filter: blur(0.45em); user-select: none; }
-.nospoil .reveal .spoiler { filter: none; }
-.nospoil .match.in .when::before { display: none; }
+/* ---------- live: strip, goals, filters ---------- */
+.match.in { background: color-mix(in srgb, var(--yellow) 7%, transparent); }
+.flash .score b, .bigscore.flash { animation: goal 1.2s ease-out 3; }
+@keyframes goal { 0% { color: var(--yellow); transform: scale(1.35); } 100% { transform: scale(1); } }
+.live-strip { margin: 10px calc(var(--gutter) * -1) 4px; }
+.live-strip h2 { display: flex; align-items: center; gap: 8px; margin: 0 var(--gutter) 8px; font: 700 1.1rem var(--display); color: var(--live); }
+.live-strip h2 i, .pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--yellow); display: inline-block; animation: pulse 1.6s ease-in-out infinite; }
+.pulse { margin-right: 6px; vertical-align: 1px; }
+.live-cards { display: flex; gap: 10px; overflow-x: auto; padding: 0 var(--gutter) 6px; scroll-padding-inline: var(--gutter); scroll-snap-type: x mandatory; scrollbar-width: none; }
+.live-cards::-webkit-scrollbar { display: none; }
+.live-card {
+  flex: 0 0 min(78%, 260px); scroll-snap-align: start; text-decoration: none; color: #fff; border-radius: 14px; padding: 10px 12px;
+  display: grid; gap: 6px; background: repeating-linear-gradient(90deg, var(--turf) 0 24px, var(--turf-2) 24px 48px);
+}
+.live-card small { display: flex; justify-content: space-between; opacity: .9; font-size: 0.78rem; }
+.live-card small b { color: var(--yellow); }
+.live-card > span { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.live-card em { flex: 1; font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-card > span b { font: 700 1.35rem/1 var(--display); }
+.filters { padding-top: 10px; }
+.filters button {
+  flex: none; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: none; cursor: pointer;
+  font: 600 0.9rem var(--display); color: var(--muted);
+}
+.filters button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--chalk); }
+#toast {
+  position: fixed; left: 50%; transform: translateX(-50%); top: calc(10px + env(safe-area-inset-top)); z-index: 5;
+  width: min(92vw, 420px); padding: 12px 14px; border-radius: 14px; background: var(--ink); color: var(--chalk);
+  box-shadow: 0 8px 24px rgba(0,0,0,.25); animation: drop .35s ease-out;
+}
+#toast a { color: inherit; text-decoration: none; display: block; }
+#toast b { color: var(--yellow); margin-right: 4px; }
+@keyframes drop { from { transform: translate(-50%, -20px); opacity: 0; } }
 
 /* ---------- match view: the one loud moment ---------- */
 .match-view { margin-inline: calc(var(--gutter) * -1); }
@@ -156,10 +186,6 @@ main { padding: 0 var(--gutter) 24px; outline: none; }
 .bigscore .vs { font-size: 1.6rem; opacity: .8; }
 .status { margin: 10px 0 0; font: 600 1rem var(--display); }
 .status.in { color: var(--yellow); }
-.reveal-btn {
-  margin-top: 10px; background: rgba(0,0,0,.25); color: #fff; border: 1px solid rgba(255,255,255,.5);
-  border-radius: 999px; padding: 6px 14px; cursor: pointer;
-}
 
 .seg {
   display: flex; overflow-x: auto; scrollbar-width: none; position: sticky; top: 0; z-index: 2;

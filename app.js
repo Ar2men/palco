@@ -14,7 +14,6 @@ const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } cat
 
 let myLeagues = load('ligas', DEFAULT_LEAGUES).filter(id => LEAGUES.some(l => l.id === id));
 let h12 = load('h12', true);
-let noSpoil = load('sinSpoilers', false);
 let day = new Date(); // always opens on today, on purpose
 let timer;
 
@@ -45,11 +44,19 @@ function matchRow(e, lg) {
   const when = e.state === 'pre' ? fmtTime(e.date) : esc(e.label);
   const score = e.state === 'pre' ? '' : `<b>${esc(e.home.score)}</b><b>${esc(e.away.score)}</b>`;
   const team = t => `<span class="team${t.winner ? ' win' : ''}">${img(t.logo)}<span>${esc(t.name)}</span></span>`;
-  return `<a class="match ${e.state}" href="#/partido/${esc(lg)}/${esc(e.id)}">
+  return `<a class="match ${e.state}${trackScore(e, lg)}" href="#/partido/${esc(lg)}/${esc(e.id)}">
     <span class="when">${when}</span>
     <span class="teams">${team(e.home)}${team(e.away)}</span>
-    <span class="score spoiler">${score}</span></a>`;
+    <span class="score">${score}</span></a>`;
 }
+
+// "En vivo ahora": every match being played in the user's leagues, as swipeable cards.
+const liveStrip = items => items.length ? `<section class="live-strip" aria-label="En vivo ahora"><h2><i></i>En vivo ahora</h2>
+  <div class="live-cards">${items.map(({ e, lg }) => `<a class="live-card" href="#/partido/${esc(lg)}/${esc(e.id)}">
+    <small>${esc(leagueName(lg))} <b>${esc(e.label)}</b></small>
+    <span>${img(e.home.logo)}<em>${esc(e.home.name)}</em><b>${esc(e.home.score)}</b></span>
+    <span>${img(e.away.logo)}<em>${esc(e.away.name)}</em><b>${esc(e.away.score)}</b></span></a>`).join('')}</div></section>` : '';
+let dayFilter = '';
 
 const leagueBlock = (id, body) =>
   `<section class="league"><h2><span>${esc(leagueName(id))}</span>
@@ -62,30 +69,35 @@ function renderDays() {
   days.querySelector('[aria-pressed="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
 }
 
-async function viewDay(quiet) {
-  renderDays();
+async function viewDay() {
+  if (quietRender) days.hidden = false; else renderDays(); // a refresh must not move the day strip
   if (!myLeagues.length) return noLeagues();
-  if (!quiet) main.innerHTML = loading();
+  if (!quietRender) main.innerHTML = loading();
   const res = await Promise.allSettled(myLeagues.map(id => scoreboard(id, datesAround(day))));
-  let html = '', live = false;
-  const empty = [];
+  let html = '';
+  const empty = [], live = [], playing = [];
   res.forEach((r, i) => {
     const id = myLeagues[i];
-    if (r.status === 'rejected') { html += leagueBlock(id, `<p class="note">No se pudo cargar esta liga.</p>`); return; }
+    if (r.status === 'rejected') { if (!dayFilter || dayFilter === id) html += leagueBlock(id, `<p class="note">No se pudo cargar esta liga.</p>`); return; }
     const evs = eventsForDay(r.value, day);
     if (!evs.length) return empty.push(leagueName(id));
-    live ||= evs.some(e => e.state === 'in');
-    html += leagueBlock(id, evs.map(e => matchRow(e, id)).join(''));
+    playing.push(id);
+    evs.filter(e => e.state === 'in').forEach(e => live.push({ e, lg: id }));
+    if (!dayFilter || dayFilter === id) html += leagueBlock(id, evs.map(e => matchRow(e, id)).join(''));
   });
+  liveNow = live.length > 0;
+  if (dayFilter && !playing.includes(dayFilter)) dayFilter = '';
+  const filters = playing.length > 1 ? `<div class="chips filters">${[['', 'Todas'], ...playing.map(id => [id, leagueName(id)])].map(([id, label]) =>
+    `<button type="button" data-filter="${esc(id)}" aria-pressed="${dayFilter === id}">${esc(label)}</button>`).join('')}</div>` : '';
   main.innerHTML = html
-    ? html + (empty.length ? `<p class="rest">Sin partidos este día: ${empty.map(esc).join(', ')}.</p>` : '')
+    ? liveStrip(dayFilter ? live.filter(x => x.lg === dayFilter) : live) + filters + html +
+      (empty.length && !dayFilter ? `<p class="rest">Sin partidos este día: ${empty.map(esc).join(', ')}.</p>` : '')
     : `<div class="empty"><p>Tus ligas no juegan este día.</p><a class="btn" href="#/proximos">Ver próximos partidos</a></div>`;
-  if (live) timer = setTimeout(() => !document.hidden && route(true), 30000);
 }
 
 async function viewUpcoming() {
   if (!myLeagues.length) return noLeagues();
-  main.innerHTML = loading();
+  if (!quietRender) main.innerHTML = loading();
   const today = new Date();
   const res = await Promise.allSettled(myLeagues.map(id => scoreboard(id, datesAround(today, 0, 7))));
   const all = [];
@@ -93,6 +105,7 @@ async function viewUpcoming() {
     const s = simplifyEvent(e);
     if (s.state !== 'post' && new Date(s.date) >= addDays(today, -1)) all.push({ ...s, lg: myLeagues[i], order: i });
   }));
+  liveNow = all.some(e => e.state === 'in');
   if (!all.length) {
     main.innerHTML = `<div class="empty"><p>No hay partidos de tus ligas en los próximos 7 días.</p></div>`;
     return;
@@ -112,7 +125,7 @@ async function viewTables(lg = myLeagues[0]) {
   if (!myLeagues.length) return noLeagues();
   const chips = `<div class="chips" role="tablist">${myLeagues.map(id =>
     `<a role="tab" href="#/tablas/${esc(id)}" aria-selected="${id === lg}">${esc(leagueName(id))}</a>`).join('')}</div>`;
-  main.innerHTML = chips + loading();
+  if (!quietRender) main.innerHTML = chips + loading();
   const groups = simplifyStandings(await get(`${API_STANDINGS}/${lg}/standings`));
   const zones = new Map();
   const body = groups.map(g => {
@@ -137,8 +150,8 @@ const STATS = [
 ];
 const KIND = { goal: 'gol', 'own-goal': 'gol', 'penalty---scored': 'gol', 'yellow-card': 'amarilla', 'red-card': 'roja', substitution: 'cambio' };
 
-async function viewMatch(lg, id, quiet) {
-  if (!quiet) main.innerHTML = loading();
+async function viewMatch(lg, id) {
+  if (!quietRender) main.innerHTML = loading();
   const d = await get(`${API}/${lg}/summary?event=${encodeURIComponent(id)}`);
   const comp = d.header.competitions[0];
   const side = h => comp.competitors.find(c => c.homeAway === h);
@@ -169,6 +182,8 @@ async function viewMatch(lg, id, quiet) {
   const lineup = rosters.map(r => lineupBlock(r.team, r.formation, r.roster, 'Alineación confirmada')).join('');
   const players = rosters.map(playersTable).join('');
 
+  liveNow = state === 'in';
+  const flash = trackScore({ id, state, home: { name: home.team.shortDisplayName || home.team.displayName, score: home.score }, away: { name: away.team.shortDisplayName || away.team.displayName, score: away.score } }, lg);
   const statusText = state === 'pre' ? `${fmtDay(new Date(comp.date))}, ${fmtTime(comp.date)}` : statusLabel(comp.status);
   const venue = d.gameInfo?.venue;
   const tab = matchTab.get(id) ?? (state === 'pre' ? 'previa' : 'resumen');
@@ -182,23 +197,21 @@ async function viewMatch(lg, id, quiet) {
       <p class="comp">${esc(leagueName(lg))}</p>
       <div class="board">
         <div class="side">${img(logo(home), 'crest big')}<span>${name(home)}</span></div>
-        <div class="bigscore spoiler">${state === 'pre' ? '<span class="vs">vs</span>' : `${esc(home.score)}<span>–</span>${esc(away.score)}`}</div>
+        <div class="bigscore${flash}">${state === 'pre' ? '<span class="vs">vs</span>' : `${esc(home.score)}<span>–</span>${esc(away.score)}`}</div>
         <div class="side">${img(logo(away), 'crest big')}<span>${name(away)}</span></div>
       </div>
-      <p class="status ${state}">${esc(statusText)}</p>
-      ${noSpoil && state !== 'pre' ? '<button class="reveal-btn" type="button">Mostrar marcador</button>' : ''}
+      <p class="status ${state}">${state === 'in' ? '<i class="pulse"></i>' : ''}${esc(statusText)}</p>
     </header>
     <div class="seg" role="tablist" data-match="${esc(id)}">${tabs.map(([k, label]) =>
       `<button role="tab" aria-selected="${k === tab}" data-tab="${k}">${label}</button>`).join('')}</div>
     ${panel('previa', previa(d, home, away, ask))}
-    ${panel('resumen', events ? `<ol class="timeline spoiler">${events}</ol>` : `<p class="note">${state === 'pre' ? 'El partido no ha empezado.' : 'Sin eventos todavía.'}</p>`)}
-    ${panel('stats', stats ? `<ul class="stats spoiler">${stats}</ul>` : '<p class="note">Las estadísticas aparecen cuando empieza el partido.</p>')}
-    ${panel('jugadores', players ? `<div class="spoiler">${players}</div>` : '<p class="note">Las estadísticas de cada jugador aparecen cuando empieza el partido.</p>')}
+    ${panel('resumen', events ? `<ol class="timeline">${events}</ol>` : `<p class="note">${state === 'pre' ? 'El partido no ha empezado.' : 'Sin eventos todavía.'}</p>`)}
+    ${panel('stats', stats ? `<ul class="stats">${stats}</ul>` : '<p class="note">Las estadísticas aparecen cuando empieza el partido.</p>')}
+    ${panel('jugadores', players ? players : '<p class="note">Las estadísticas de cada jugador aparecen cuando empieza el partido.</p>')}
     ${panel('alineaciones', lineup || '<div data-probable><p class="note">Buscando la alineación probable…</p></div>')}
   </article>`;
   if (!lineup) probableLineups(d, [home, away]).then(html => { const el = main.querySelector('[data-probable]'); if (el) el.innerHTML = html; });
   if (venue) weatherFor(venue, comp.date).then(txt => { const el = main.querySelector('[data-weather]'); if (el && txt) el.textContent = txt; });
-  if (state === 'in') timer = setTimeout(() => !document.hidden && route(true), 30000);
 }
 
 const matchTab = new Map(); // remembers the open tab per match across live refreshes
@@ -384,7 +397,6 @@ function viewSettings() {
     ${rest ? `<h3>Agregar liga</h3><ul class="leagues">${rest}</ul>` : ''}
     <h2>Preferencias</h2>
     <label class="row"><span>Formato de 12 horas</span><input type="checkbox" id="h12" ${h12 ? 'checked' : ''}></label>
-    <label class="row"><span>Ocultar marcadores (sin spoilers)</span><input type="checkbox" id="nospoil-set" ${noSpoil ? 'checked' : ''}></label>
     <p class="about">Palco no tiene anuncios, cuenta ni rastreo. Datos: API pública de ESPN. Análisis: Claude (Anthropic).</p>
   </div>`;
 }
@@ -488,6 +500,13 @@ const noLeagues = () => { main.innerHTML = `<div class="empty"><p>Elige las liga
 
 const routes = { '': viewDay, proximos: viewUpcoming, ia: viewChat, tablas: viewTables, ajustes: viewSettings, partido: viewMatch };
 
+// Live engine: every data screen re-renders itself quietly on a timer, faster while a match is being played.
+const REFRESH = { '': 60, proximos: 60, partido: 60, tablas: 120 }; // seconds; chat and settings don't refresh
+const LIVE_REFRESH = 20;
+let quietRender = false, liveNow = false, updatedAt = 0;
+const lastScore = new Map(); // event id -> "h-a", to spot new goals between refreshes
+const newGoals = [];
+
 async function route(quiet = false) {
   clearTimeout(timer);
   const [name, ...args] = location.hash.replace(/^#\/?/, '').split('/');
@@ -496,32 +515,67 @@ async function route(quiet = false) {
   document.querySelectorAll('.tabs a').forEach(a => a.toggleAttribute('aria-current', a.getAttribute('href') === tab));
   if (view !== viewDay) days.hidden = true;
   document.body.dataset.view = name || 'hoy';
+  quietRender = quiet; liveNow = false;
+  let ok = true;
   try {
-    await view(...args.map(decodeURIComponent), ...(view === viewDay ? [quiet] : view === viewMatch ? [quiet] : []));
+    await view(...args.map(decodeURIComponent));
   } catch (err) {
+    ok = false;
     console.error(err);
     const msg = navigator.onLine ? 'ESPN no mandó los datos de esta pantalla. Intenta en un momento.' : 'Sin conexión a internet. Revisa tu conexión.';
     if (!quiet) main.innerHTML = `<div class="empty"><p>${msg}</p><button class="btn" data-retry>Reintentar</button></div>`;
   }
   if (!quiet) { window.scrollTo(0, 0); main.focus({ preventScroll: true }); }
+  const every = REFRESH[routes[name] ? name : ''];
+  if (ok && every) updatedAt = Date.now();
+  showGoals();
+  renderStatus(every);
+  if (every) timer = setTimeout(() => { if (!document.hidden) route(true); }, (liveNow ? LIVE_REFRESH : every) * 1000);
+}
+
+// Header pill: live pulse or "actualizado hace X"; tapping it refreshes now.
+function renderStatus(every = REFRESH[location.hash.replace(/^#\/?/, '').split('/')[0]]) {
+  const el = $('#status');
+  if (!every || !updatedAt) { el.hidden = true; return; }
+  const secs = Math.round((Date.now() - updatedAt) / 1000);
+  el.hidden = false;
+  el.classList.toggle('live', liveNow);
+  el.querySelector('span').textContent = (liveNow ? 'En vivo, ' : '') + (secs < 5 ? 'recién actualizado' : `hace ${secs < 60 ? secs + ' s' : Math.round(secs / 60) + ' min'}`);
+}
+setInterval(() => !document.hidden && renderStatus(), 5000);
+
+// Remember each score; a higher total than last time means a goal just happened.
+function trackScore(e, lg) {
+  if (e.state === 'pre') return '';
+  const key = `${e.home.score}-${e.away.score}`, prev = lastScore.get(e.id);
+  lastScore.set(e.id, key);
+  if (prev == null || prev === key) return '';
+  const [ph, pa] = prev.split('-').map(Number), [h, a] = key.split('-').map(Number);
+  if (h + a > ph + pa) newGoals.push({ e, lg, who: h > ph ? e.home.name : e.away.name });
+  return ' flash';
+}
+
+function showGoals() {
+  const g = newGoals.splice(0).at(-1);
+  if (!g) return;
+  const toast = $('#toast');
+  toast.innerHTML = `<a href="#/partido/${esc(g.lg)}/${esc(g.e.id)}"><b>¡Gol de ${esc(g.who)}!</b> ${esc(g.e.home.name)} ${esc(g.e.home.score)}–${esc(g.e.away.score)} ${esc(g.e.away.name)}</a>`;
+  toast.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { toast.hidden = true; }, 6000);
+  navigator.vibrate?.(200);
 }
 
 /* ---------- events ---------- */
-
-function setSpoil(on) {
-  noSpoil = on; save('sinSpoilers', on);
-  document.body.classList.toggle('nospoil', on);
-  $('#spoil').setAttribute('aria-pressed', on);
-}
 
 document.addEventListener('click', e => {
   const t = e.target.closest('button');
   if (!t) return;
   if (t.dataset.day) { day = new Date(t.dataset.day.replace(/(\d{4})(\d\d)(\d\d)/, '$1-$2-$3T12:00')); route(); }
-  else if (t.id === 'spoil') { setSpoil(!noSpoil); }
+  else if (t.id === 'status') { route(true); }
+  else if (t.dataset.filter != null) { dayFilter = t.dataset.filter; route(true); }
   else if (t.dataset.retry != null) { route(); }
   else if (t.dataset.back != null) { history.length > 1 ? history.back() : (location.hash = '#/'); }
-  else if (t.classList.contains('reveal-btn')) { t.closest('.match-view').classList.add('reveal'); t.remove(); }
   else if (t.dataset.tab) {
     const view = t.closest('.match-view');
     view.querySelectorAll('[role=tab]').forEach(b => b.setAttribute('aria-selected', b === t));
@@ -544,7 +598,6 @@ document.addEventListener('submit', e => {
 
 document.addEventListener('change', e => {
   if (e.target.id === 'h12') { h12 = e.target.checked; save('h12', h12); }
-  if (e.target.id === 'nospoil-set') setSpoil(e.target.checked);
 });
 
 // Coming back to the app after a while: jump to today and refresh.
@@ -552,10 +605,9 @@ let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { hiddenAt = Date.now(); return; }
   if (Date.now() - hiddenAt > 10 * 60e3 && !location.hash.startsWith('#/partido')) { day = new Date(); }
-  if (Date.now() - hiddenAt > 30e3 && location.hash !== '#/ia') route(true);
+  if (Date.now() - hiddenAt > 5e3 && location.hash !== '#/ia') route(true); // back in the app: fresh data right away
 });
 
 window.addEventListener('hashchange', () => route());
-setSpoil(noSpoil);
 route();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
