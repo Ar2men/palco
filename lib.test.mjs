@@ -71,3 +71,22 @@ assert.equal(ex.odds.draw, 5);
 assert.equal(ex.odds.away, 2);
 assert.equal(eventExtras({ competitions: [{}] }).odds, null);
 console.log('extras ok');
+
+import { teamStreaks, h2hStreaks, momentum } from './lib.js';
+const streak = teamStreaks([
+  { homeTeamId: '1', homeTeamScore: '1', awayTeamScore: '2' }, // lost 1-2 at home
+  { homeTeamId: '9', homeTeamScore: '0', awayTeamScore: '3' }, // won 3-0 away
+  { homeTeamId: '1', homeTeamScore: '1', awayTeamScore: '1' },
+], '1');
+assert.deepEqual({ ...streak, gfAvg: streak.gfAvg.toFixed(2), gaAvg: streak.gaAvg.toFixed(2) },
+  { n: 3, won: 1, drew: 1, lost: 1, scored: 3, cleanSheet: 1, btts: 2, over25: 2, gfAvg: '1.67', gaAvg: '1.00' });
+assert.equal(teamStreaks([], '1'), null);
+assert.deepEqual(h2hStreaks([{ h: 2, a: 2 }, { h: 0, a: 1 }]), { n: 2, btts: 1, over25: 1, goalsAvg: 2.5 });
+const mo = momentum([
+  { play: { type: { text: 'Shot On Target' }, team: { displayName: 'America' }, clock: { value: 7 * 60 } } },
+  { play: { type: { text: 'Corner Awarded' }, team: { displayName: 'Tigres UANL' }, clock: { value: 20 * 60 } } },
+  { play: { type: { text: 'Foul' }, team: { displayName: 'Tigres UANL' }, clock: { value: 21 * 60 } } },
+  { play: { type: { text: 'Goal - Header' }, team: { displayName: 'Tigres UANL' }, clock: { value: 95 * 60 } } },
+], ['Tigres UANL', 'Tigres'], ['América', 'Club América']);
+assert.deepEqual(mo.map(b => [b.home, b.away]), [[0, 2], [1, 0], [0, 0], [0, 0], [0, 0], [3, 0]]);
+console.log('streaks ok');

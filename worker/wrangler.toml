@@ -12,3 +12,16 @@ namespace_id = "1001"
   [ratelimits.simple]
   limit = 6
   period = 60
+
+# Push alerts: subscriptions and last-seen match states. Free tier: 100k reads / 1k writes a day.
+[[kv_namespaces]]
+binding = "PUSH"
+id = "6051ae16e79f45d78a6f23e7e8ff5a1b"
+
+# Public half of the VAPID key (the private half is the secret VAPID_PRIVATE_JWK).
+[vars]
+VAPID_PUBLIC = "BL8BWw4USJe5YALmSprzFK4PVsTTHtxVnmGlIJIrHYnuMKJdH3lt3wVWnNoEFqKfXB9QQGyTEgrTiIWZwbMz_Pc"
+
+# Check live matches of followed teams every minute.
+[triggers]
+crons = ["* * * * *"]

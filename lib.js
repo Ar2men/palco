@@ -1,24 +1,25 @@
 // Pure helpers, no DOM: app.js uses them and lib.test.mjs checks them with node.
 
 export const LEAGUES = [
-  { id: 'mex.1', name: 'Liga MX' },
-  { id: 'eng.1', name: 'Premier League' },
-  { id: 'esp.1', name: 'LaLiga' },
-  { id: 'uefa.champions', name: 'Champions League' },
-  { id: 'ita.1', name: 'Serie A' },
-  { id: 'ger.1', name: 'Bundesliga' },
-  { id: 'fra.1', name: 'Ligue 1' },
-  { id: 'usa.1', name: 'MLS' },
-  { id: 'uefa.europa', name: 'Europa League' },
-  { id: 'concacaf.champions', name: 'Concacaf Champions Cup' },
-  { id: 'mex.2', name: 'Liga de Expansión MX' },
-  { id: 'arg.1', name: 'Liga Profesional Argentina' },
-  { id: 'bra.1', name: 'Brasileirão' },
-  { id: 'col.1', name: 'Liga BetPlay Colombia' },
-  { id: 'por.1', name: 'Liga Portugal' },
-  { id: 'ned.1', name: 'Eredivisie' },
-  { id: 'fifa.world', name: 'Copa del Mundo' },
+  { id: 'mex.1', logo: 22, name: 'Liga MX' },
+  { id: 'eng.1', logo: 23, name: 'Premier League' },
+  { id: 'esp.1', logo: 15, name: 'LaLiga' },
+  { id: 'uefa.champions', logo: 2, name: 'Champions League' },
+  { id: 'ita.1', logo: 12, name: 'Serie A' },
+  { id: 'ger.1', logo: 10, name: 'Bundesliga' },
+  { id: 'fra.1', logo: 9, name: 'Ligue 1' },
+  { id: 'usa.1', logo: 19, name: 'MLS' },
+  { id: 'uefa.europa', logo: 2310, name: 'Europa League' },
+  { id: 'concacaf.champions', logo: 2298, name: 'Concacaf Champions Cup' },
+  { id: 'mex.2', logo: 2306, name: 'Liga de Expansión MX' },
+  { id: 'arg.1', logo: 1, name: 'Liga Profesional Argentina' },
+  { id: 'bra.1', logo: 85, name: 'Brasileirão' },
+  { id: 'col.1', logo: 1543, name: 'Liga BetPlay Colombia' },
+  { id: 'por.1', logo: 14, name: 'Liga Portugal' },
+  { id: 'ned.1', logo: 11, name: 'Eredivisie' },
+  { id: 'fifa.world', logo: 4, name: 'Copa del Mundo' },
 ];
+export const leagueLogo = id => { const n = LEAGUES.find(l => l.id === id)?.logo; return n ? `https://a.espncdn.com/i/leaguelogos/soccer/500/${n}.png` : ''; };
 export const DEFAULT_LEAGUES = ['mex.1', 'eng.1', 'esp.1', 'uefa.champions'];
 
 const pad = n => String(n).padStart(2, '0');
@@ -146,4 +147,38 @@ export function eventExtras(e) {
   const o = c.odds?.[0];
   const odds = o?.moneyline ? { home: ml(o.moneyline.home?.close?.odds), draw: ml(o.drawOdds?.moneyLine), away: ml(o.moneyline.away?.close?.odds), total: o.overUnder ?? null } : null;
   return { form, odds };
+}
+
+// Streaks for one team from ESPN's recent-games list (home/away ids and scores; the "score" text is winner-first).
+export function teamStreaks(games, teamId) {
+  const g = (games ?? []).filter(e => e.homeTeamScore != null && e.awayTeamScore != null).map(e => {
+    const home = e.homeTeamId === teamId, gf = Number(home ? e.homeTeamScore : e.awayTeamScore), ga = Number(home ? e.awayTeamScore : e.homeTeamScore);
+    return { gf, ga };
+  });
+  const n = g.length, c = f => g.filter(f).length;
+  return n ? { n, won: c(x => x.gf > x.ga), drew: c(x => x.gf === x.ga), lost: c(x => x.gf < x.ga), scored: c(x => x.gf > 0),
+    cleanSheet: c(x => x.ga === 0), btts: c(x => x.gf > 0 && x.ga > 0), over25: c(x => x.gf + x.ga > 2.5),
+    gfAvg: g.reduce((s, x) => s + x.gf, 0) / n, gaAvg: g.reduce((s, x) => s + x.ga, 0) / n } : null;
+}
+
+// Same idea for past meetings: [{h, a}] goals.
+export function h2hStreaks(scores) {
+  const n = scores.length, c = f => scores.filter(f).length;
+  return n ? { n, btts: c(x => x.h > 0 && x.a > 0), over25: c(x => x.h + x.a > 2.5), goalsAvg: scores.reduce((s, x) => s + x.h + x.a, 0) / n } : null;
+}
+
+// Momentum from the play-by-play: shots, shots on target, corners and goals per 15-minute block for each side.
+const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const WEIGHT = { 'Shot Off Target': 1, 'Shot Blocked': 1, 'Shot On Target': 2, 'Corner Awarded': 1 };
+export function momentum(commentary, homeNames, awayNames) {
+  const isSide = (name, names) => names.some(x => x && (norm(x) === norm(name) || norm(x).startsWith(norm(name)) || norm(name).startsWith(norm(x))));
+  const bins = Array.from({ length: 6 }, () => ({ home: 0, away: 0 }));
+  for (const c of commentary ?? []) {
+    const type = c.play?.type?.text ?? '', w = WEIGHT[type] ?? (type.startsWith('Goal') ? 3 : 0);
+    const team = c.play?.team?.displayName, secs = c.play?.clock?.value ?? c.time?.value;
+    if (!w || !team || secs == null) continue;
+    const side = isSide(team, homeNames) ? 'home' : isSide(team, awayNames) ? 'away' : null;
+    if (side) bins[Math.min(5, Math.floor(secs / 60 / 15))][side] += w;
+  }
+  return bins;
 }
