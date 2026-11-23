@@ -335,8 +335,8 @@ function viewSettings() {
 /* ---------- analista IA ---------- */
 
 // The analyst runs on Palco's own server (worker/ in this repo): the Anthropic key lives there, never in the app.
-// After `npm run deploy` in worker/, put the Worker's URL here.
-const AI_URL = 'https://palco-ia.REEMPLAZAR.workers.dev';
+// Deployed from worker/ with `npm run deploy`.
+const AI_URL = 'https://palco-ia.ar2men.workers.dev';
 
 let chatApi = load('chatApi', []);   // exact messages sent to the API (thinking and search blocks included)
 let chatView = load('chatView', []); // what the user sees: { role, text }
